@@ -7,6 +7,12 @@ FROM node:20-alpine AS build
 # Define o diretório de trabalho
 WORKDIR /app
 
+# Declara o argumento que será recebido do docker-compose.yml
+ARG VITE_API_BASE_URL
+
+# Torna a variável de ambiente disponível para o processo de build
+ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
+
 # Copia o package.json e o package-lock.json para o contêiner
 COPY package.json ./
 COPY package-lock.json ./
@@ -18,6 +24,7 @@ RUN npm install
 COPY . .
 
 # Executa o script de build do Vite para gerar os arquivos estáticos
+# O Vite irá substituir automaticamente import.meta.env.VITE_API_BASE_URL pelo valor da variável de ambiente
 RUN npm run build
 
 

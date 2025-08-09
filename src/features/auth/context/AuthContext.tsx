@@ -19,7 +19,7 @@ interface AuthProviderProps {
 }
 
 // Pega a URL base da API das variáveis de ambiente do Vite
-const API_BASE_URL = 'https://backend.recrutamentoia.com.br';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
 
 export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [authState, setAuthState] = useState<AuthState>({
