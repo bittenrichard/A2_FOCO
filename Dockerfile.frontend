@@ -1,10 +1,8 @@
-# Local: Dockerfile.frontend
+# Dockerfile.frontend
 
 # --- Estágio 1: Build da Aplicação React ---
-# CORREÇÃO: Trocamos 'alpine' por 'slim' para maior compatibilidade com pacotes nativos.
 FROM node:20-slim AS build
 
-# Define o diretório de trabalho
 WORKDIR /app
 
 # Declara o argumento que será recebido do docker-compose.yml
@@ -13,36 +11,23 @@ ARG VITE_API_BASE_URL
 # Torna a variável de ambiente disponível para o processo de build
 ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
 
-# Copia o package.json e o package-lock.json para o contêiner
 COPY package.json ./
 COPY package-lock.json ./
 
-# Instala todas as dependências (incluindo as de desenvolvimento para o build)
-RUN npm install
+# Força a instalação limpa
+RUN npm ci
 
-# Copia todo o código-fonte do projeto
 COPY . .
 
-# Executa o script de build do Vite para gerar os arquivos estáticos
-# O Vite irá substituir automaticamente import.meta.env.VITE_API_BASE_URL pelo valor da variável de ambiente
+# Executa o script de build do Vite
 RUN npm run build
 
 
 # --- Estágio 2: Servidor de Produção com Nginx ---
-# Usamos uma imagem oficial e leve do Nginx (aqui o Alpine não tem problema)
 FROM nginx:1.27-alpine
 
-# Remove a configuração padrão do Nginx
 RUN rm /etc/nginx/conf.d/default.conf
-
-# Copia a nossa configuração personalizada do Nginx para o contêiner
 COPY nginx.conf /etc/nginx/conf.d
-
-# Copia os arquivos estáticos gerados no estágio de build para o diretório do Nginx
 COPY --from=build /app/dist /usr/share/nginx/html
-
-# Expõe a porta 80, que é a porta padrão do Nginx
 EXPOSE 80
-
-# Comando para iniciar o Nginx quando o contêiner for executado
 CMD ["nginx", "-g", "daemon off;"]

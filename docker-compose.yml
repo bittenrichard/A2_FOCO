@@ -1,10 +1,11 @@
+# Local: docker-compose.yml
+
 version: '3.8'
 
 services:
   # --- Serviço do Backend (API) ---
   backend:
-    # IMPORTANTE: Substitua 'seu-usuario-dockerhub' pelo seu nome de usuário no Docker Hub
-    # Exemplo: image: orickjogando/recrutamentoia-backend:1.0.0
+    # A tag da sua imagem do backend.
     image: orickjogando/recrutamentoia-backend:1.0.0
     build:
       context: .
@@ -30,14 +31,14 @@ services:
 
   # --- Serviço do Frontend (React App) ---
   frontend:
-    # IMPORTANTE: Substitua 'seu-usuario-dockerhub' pelo seu nome de usuário no Docker Hub
-    # Exemplo: image: orickjogando/recrutamentoia-frontend:1.0.0
+    # A tag da sua imagem do frontend.
     image: orickjogando/recrutamentoia-frontend:1.0.0
     build:
       context: .
       dockerfile: Dockerfile.frontend
       args:
-        # Passa a URL da API como argumento de build para o Vite
+        # AQUI ESTÁ A CORREÇÃO CRUCIAL:
+        # Esta linha injeta a URL correta do backend durante o build do frontend.
         VITE_API_BASE_URL: https://backend.recrutamentoia.com.br
     networks:
       - traefik_network
@@ -57,6 +58,7 @@ services:
         - "traefik.http.services.frontend-service.loadbalancer.server.port=80"
 
 # --- Definição da Rede Externa do Traefik ---
+# Garante que os contêineres se conectem à rede que o Traefik está monitorando.
 networks:
   traefik_network:
     external: true
