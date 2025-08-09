@@ -1,20 +1,21 @@
-# Dockerfile.backend
+# Local: Dockerfile.backend
 
-# --- Estágio 1: Build ---
-# Usamos uma imagem Node mais robusta para compilar o TypeScript
+# --- Estágio 1: Build da Aplicação ---
+# Imagem base com Node.js e Alpine Linux para um tamanho menor
 FROM node:20-alpine AS build
 
-# Define o diretório de trabalho dentro do contêiner
+# Define o diretório de trabalho
 WORKDIR /app
 
-# Copia os arquivos de manifesto de pacotes
+# Copia os arquivos de definição de pacotes
 COPY package.json ./
 COPY package-lock.json ./
 
-# Instala as dependências de produção
-RUN npm install --omit=dev
+# Instala TODAS as dependências, incluindo as de desenvolvimento (devDependencies)
+# 'typescript' é uma devDependency e é necessária para o build
+RUN npm install
 
-# Copia todo o resto do código-fonte
+# Copia todo o restante do código-fonte
 COPY . .
 
 # Compila o TypeScript para JavaScript
@@ -22,22 +23,25 @@ COPY . .
 RUN npm run build:server
 
 
-# --- Estágio 2: Produção ---
-# Usamos uma imagem Node mais leve para a execução
+# --- Estágio 2: Imagem Final de Produção ---
+# Imagem base mais enxuta para produção, ideal para rodar a aplicação
 FROM node:20-slim
 
 # Define o diretório de trabalho
 WORKDIR /app
 
-# Copia o package.json para o caso de precisarmos de alguma informação dele
+# Copia o package.json e package-lock.json para instalar apenas as dependências de produção
 COPY package.json ./
+COPY package-lock.json ./
 
-# Copia os artefatos compilados do estágio de build
-COPY --from=build /app/dist-server ./dist-server
-COPY --from=build /app/node_modules ./node_modules
+# Instala APENAS as dependências de produção e lida com dependências de pares legadas se necessário
+RUN npm install --omit=dev --legacy-peer-deps
 
-# Expõe a porta em que o servidor Express roda
+# CORREÇÃO AQUI: Copia da pasta correta 'dist-server' para a pasta 'dist' na imagem final
+COPY --from=build /app/dist-server ./dist
+
+# Expõe a porta que a aplicação vai rodar
 EXPOSE 3001
 
-# Comando para iniciar o servidor em produção
-CMD ["node", "./dist-server/server.js"]
+# Define o comando para iniciar a aplicação, executando o server.js compilado
+CMD ["node", "dist/server.js"]
