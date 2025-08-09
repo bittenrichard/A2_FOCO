@@ -21,8 +21,8 @@ services:
         # --- Configuração do Traefik para o Backend ---
         - "traefik.enable=true"
         - "traefik.docker.network=Foco"
-        # Roteador para a API na URL api.recrutamentoia.com.br
-        - "traefik.http.routers.backend-router.rule=Host(`api.recrutamentoia.com.br`)"
+        # Roteador para a API na URL backend.recrutamentoia.com.br
+        - "traefik.http.routers.backend-router.rule=Host(`backend.recrutamentoia.com.br`)"
         - "traefik.http.routers.backend-router.entrypoints=websecure"
         - "traefik.http.routers.backend-router.tls.certresolver=letsencryptresolver"
         # Serviço que aponta para a porta interna da API (3001)
@@ -38,7 +38,7 @@ services:
       dockerfile: frontend.Dockerfile
       args:
         # Passa a URL da API como argumento de build para o Vite
-        VITE_API_BASE_URL: https://api.recrutamentoia.com.br
+        VITE_API_BASE_URL: https://backend.recrutamentoia.com.br
     networks:
       - traefik_network
     deploy:
