@@ -14,6 +14,8 @@ import { useGoogleAuth } from '../../../shared/hooks/useGoogleAuth';
 import { useDataStore } from '../../../shared/store/useDataStore';
 import UploadModal from './UploadModal';
 
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
+
 type ViewMode = 'table' | 'kanban';
 
 interface SortConfig {
@@ -81,30 +83,30 @@ const ResultsPage: React.FC<ResultsPageProps> = ({ selectedJob, candidates, onDa
   };
 
   const handleUpdateCandidateStatus = useCallback(async (candidateId: number, newStatus: 'Triagem' | 'Entrevista' | 'Aprovado' | 'Reprovado') => {
-    // 1. Atualizar o estado local imediatamente para uma resposta mais rápida da UI
     updateCandidateStatusInStore(candidateId, newStatus);
     
-    // 2. Tentar atualizar o backend
     try {
-      const response = await fetch(`/api/candidates/${candidateId}/status`, {
+      const response = await fetch(`${API_BASE_URL}/api/candidates/${candidateId}/status`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: newStatus }),
       });
 
       if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.error || "Não foi possível atualizar o status.");
+        try {
+            const data = await response.json();
+            throw new Error(data.error || "Não foi possível atualizar o status.");
+        } catch (jsonError) {
+            console.error("A resposta do servidor não é um JSON válido:", await response.text());
+            throw new Error("Ocorreu um erro inesperado no servidor.");
+        }
       }
       
-      // AQUI ESTAVA O PROBLEMA: REMOVEMOS A CHAMADA fetchAllData() PARA EVITAR O REFRESH
-      // A atualização do estado local (feito no início da função) já resolve a questão visual.
       console.log(`Status do candidato ${candidateId} atualizado para ${newStatus} no backend.`);
 
     } catch (error: any) {
       console.error("Erro ao atualizar status do candidato:", error);
       alert("Não foi possível atualizar o status. Revertendo alteração.");
-      // Se houver um erro, re-buscar todos os dados para sincronizar o estado local com o backend
       if (profile) fetchAllData(profile); 
     }
   }, [profile, fetchAllData, updateCandidateStatusInStore]);
@@ -130,7 +132,7 @@ const ResultsPage: React.FC<ResultsPageProps> = ({ selectedJob, candidates, onDa
       formData.append('jobId', String(selectedJob.id));
       formData.append('userId', String(profile.id));
 
-      const response = await fetch('/api/upload-curriculums', {
+      const response = await fetch(`${API_BASE_URL}/api/upload-curriculums`, {
         method: 'POST',
         body: formData,
       });
@@ -159,7 +161,7 @@ const ResultsPage: React.FC<ResultsPageProps> = ({ selectedJob, candidates, onDa
     if (!candidateToSchedule || !selectedJob || !profile) return;
     setIsProcessing(true);
     try {
-      const response = await fetch('/api/google/calendar/create-event', {
+      const response = await fetch(`${API_BASE_URL}/api/google/calendar/create-event`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -201,7 +203,6 @@ const ResultsPage: React.FC<ResultsPageProps> = ({ selectedJob, candidates, onDa
   return (
     <>
       <div className="fade-in h-full flex flex-col">
-        {/* CABEÇALHO FIXO */}
         <div className="flex-shrink-0">
           <div className="flex justify-between items-center">
             <div>
@@ -212,7 +213,6 @@ const ResultsPage: React.FC<ResultsPageProps> = ({ selectedJob, candidates, onDa
               <button onClick={() => setViewMode('table')} className={`p-2 rounded-md transition-colors ${viewMode === 'table' ? 'bg-white shadow text-indigo-600' : 'text-gray-500 hover:bg-gray-200'}`}><List size={20} /></button>
               <button onClick={() => setViewMode('kanban')} className={`p-2 rounded-md transition-colors ${viewMode === 'kanban' ? 'bg-white shadow text-indigo-600' : 'text-gray-500 hover:bg-gray-200'}`}><LayoutGrid size={20} /></button>
               
-              {/* NOVO BOTÃO DE UPLOAD PARA O MODO KANBAN */}
               {viewMode === 'kanban' && (
                 <button
                   onClick={() => setIsUploadModalOpen(true)}
@@ -224,7 +224,6 @@ const ResultsPage: React.FC<ResultsPageProps> = ({ selectedJob, candidates, onDa
               )}
             </div>
           </div>
-          {/* A área de upload antiga (grande) só aparece no modo de tabela */}
           {viewMode === 'table' && (
             <>
               {uploadSuccessMessage && <div className="mt-4 p-3 bg-green-50 text-green-700 rounded-md">
