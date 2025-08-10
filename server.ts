@@ -14,10 +14,8 @@ import multer from 'multer';
 const app = express();
 const port = 3001;
 
-const upload = multer(); // Multer para lidar com upload de arquivos
+const upload = multer();
 
-// ATUALIZAÇÃO: Usa a origem diretamente, sem fallback para localhost.
-// O servidor irá falhar ao iniciar se a variável não estiver presente.
 const corsOptions = {
   origin: '*'
 };
@@ -38,7 +36,6 @@ const oauth2Client = new google.auth.OAuth2(
   process.env.GOOGLE_REDIRECT_URI
 );
 
-// --- CONSTANTES DE ID DE TABELAS ---
 const USERS_TABLE_ID = '711';
 const VAGAS_TABLE_ID = '709';
 const CANDIDATOS_TABLE_ID = '710';
@@ -46,14 +43,12 @@ const WHATSAPP_CANDIDATOS_TABLE_ID = '712';
 const AGENDAMENTOS_TABLE_ID = '713';
 const SALT_ROUNDS = 10;
 
-// Definir um tipo básico para as vagas que vêm do Baserow
 interface BaserowJobPosting {
   id: number;
   titulo: string;
   usuario?: { id: number; value: string }[]; 
 }
 
-// Definir um tipo básico para os candidatos que vêm do Baserow
 interface BaserowCandidate {
   id: number;
   vaga?: { id: number; value: string }[] | string | null;
@@ -65,14 +60,10 @@ interface BaserowCandidate {
   resumo_ia?: string | null;
   status?: { id: number; value: 'Triagem' | 'Entrevista' | 'Aprovado' | 'Reprovado' } | null;
   data_triagem?: string;
-  // NOVO: Adicionado sexo, escolaridade e idade à interface BaserowCandidate
-  sexo?: string | null; // Adicionado
-  escolaridade?: string | null; // Adicionado
-  idade?: number | null; // Adicionado
+  sexo?: string | null;
+  escolaridade?: string | null;
+  idade?: number | null;
 }
-
-
-// --- ENDPOINTS DE AUTENTICAÇÃO ---
 
 app.post('/api/auth/signup', async (req: Request, res: Response) => {
   const { nome, empresa, telefone, email, password } = req.body;
@@ -152,7 +143,6 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
   }
 });
 
-// --- ENDPOINTS PARA GERENCIAR O PERFIL DO USUÁRIO ---
 app.patch('/api/users/:userId/profile', async (req: Request, res: Response) => {
   const { userId } = req.params;
   const { nome, empresa, avatar_url } = req.body;
@@ -237,7 +227,6 @@ app.get('/api/users/:userId', async (req: Request, res: Response) => {
   }
 });
 
-// --- NOVO ENDPOINT: UPLOAD DE AVATAR ---
 app.post('/api/upload-avatar', upload.single('avatar'), async (req: Request, res: Response) => {
   const userId = req.body.userId;
   if (!userId || !req.file) {
@@ -270,9 +259,6 @@ app.post('/api/upload-avatar', upload.single('avatar'), async (req: Request, res
     res.status(500).json({ error: error.message || 'Não foi possível fazer upload do avatar.' });
   }
 });
-
-
-// --- ENDPOINTS PARA OPERAÇÕES DE VAGAS ---
 
 app.post('/api/jobs', async (req: Request, res: Response) => {
   const { titulo, descricao, endereco, requisitos_obrigatorios, requisitos_desejaveis, usuario } = req.body;
@@ -327,8 +313,6 @@ app.delete('/api/jobs/:jobId', async (req: Request, res: Response) => {
   }
 });
 
-// --- ENDPOINTS PARA OPERAÇÕES DE CANDIDATOS ---
-
 app.patch('/api/candidates/:candidateId/status', async (req: Request, res: Response) => {
   const { candidateId } = req.params;
   const { status } = req.body;
@@ -343,10 +327,7 @@ app.patch('/api/candidates/:candidateId/status', async (req: Request, res: Respo
   }
 
   try {
-    // CORREÇÃO: A API do Baserow para campos 'Single Select' com user_field_names=true
-    // espera a própria string como valor, não um objeto.
     const updatedCandidate = await baserowServer.patch(CANDIDATOS_TABLE_ID, parseInt(candidateId), { status: status });
-    
     res.json(updatedCandidate);
   } catch (error: any) {
     console.error('Erro ao atualizar status do candidato (backend):', error);
@@ -354,7 +335,6 @@ app.patch('/api/candidates/:candidateId/status', async (req: Request, res: Respo
   }
 });
 
-// Endpoint para buscar todos os dados de vagas e candidatos de um usuário (Centralizado)
 app.get('/api/data/all/:userId', async (req: Request, res: Response) => {
   const { userId } = req.params;
   if (!userId) {
@@ -362,13 +342,10 @@ app.get('/api/data/all/:userId', async (req: Request, res: Response) => {
   }
 
   try {
-    // Busca todas as vagas
     const jobsResult = await baserowServer.get(VAGAS_TABLE_ID, '');
     const allJobs: BaserowJobPosting[] = (jobsResult.results || []) as BaserowJobPosting[];
-    // Filtra vagas por usuário
     const userJobs = allJobs.filter((j: BaserowJobPosting) => j.usuario && j.usuario.some((u: any) => u.id === parseInt(userId)));
 
-    // Busca todos os candidatos das duas tabelas (CANDIDATOS_TABLE_ID e WHATSAPP_CANDIDATOS_TABLE_ID)
     const regularCandidatesResult = await baserowServer.get(CANDIDATOS_TABLE_ID, '');
     const whatsappCandidatesResult = await baserowServer.get(WHATSAPP_CANDIDATOS_TABLE_ID, '');
 
@@ -377,30 +354,23 @@ app.get('/api/data/all/:userId', async (req: Request, res: Response) => {
       ...(whatsappCandidatesResult.results || [])
     ] as BaserowCandidate[];
 
-    // Filtra candidatos por usuário
     const userCandidatesRaw = allCandidatesRaw.filter((c: BaserowCandidate) => c.usuario && c.usuario.some((u: any) => u.id === parseInt(userId)));
 
-    // Criar mapas de vagas por ID e Título para sincronização mais eficiente
     const jobsMapById = new Map<number, BaserowJobPosting>(userJobs.map((job: BaserowJobPosting) => [job.id, job]));
     const jobsMapByTitle = new Map<string, BaserowJobPosting>(userJobs.map((job: BaserowJobPosting) => [job.titulo.toLowerCase().trim(), job]));
 
-    // Sincroniza os candidatos: Garante que o campo 'vaga' seja sempre um objeto { id, value }
-    // Este é um ponto CRÍTICO. Se o 'vaga' vier como string e não for mapeado para um link de vaga,
-    // o filtro de vaga no frontend pode falhar.
     const syncedCandidates = userCandidatesRaw.map((candidate: BaserowCandidate) => {
       const newCandidate = { ...candidate };
       let vagaLink: { id: number; value: string }[] | null = null;
 
-      // Se candidate.vaga é uma string (Baserow WhatsApp candidatos)
       if (candidate.vaga && typeof candidate.vaga === 'string') {
         const jobMatch = jobsMapByTitle.get(candidate.vaga.toLowerCase().trim());
         if (jobMatch) {
           vagaLink = [{ id: jobMatch.id, value: jobMatch.titulo }];
         }
-      // Se candidate.vaga já é um array de objetos (Baserow candidatos normais)
       } else if (candidate.vaga && Array.isArray(candidate.vaga) && candidate.vaga.length > 0) {
         const linkedVaga = candidate.vaga[0] as { id: number; value: string };
-        const jobMatch = jobsMapById.get(linkedVaga.id); // Confirma que a vaga existe
+        const jobMatch = jobsMapById.get(linkedVaga.id);
         if (jobMatch) {
           vagaLink = [{ id: jobMatch.id, value: jobMatch.titulo }];
         }
@@ -408,17 +378,6 @@ app.get('/api/data/all/:userId', async (req: Request, res: Response) => {
       return { ...newCandidate, vaga: vagaLink };
     });
     
-    // NOVO: Log para verificar os dados de jobs e candidates ANTES de enviar para o frontend
-    console.log("Server: Dados de Jobs (usuário):", userJobs.length);
-    console.log("Server: Dados de Candidates (sincronizados para usuário):", syncedCandidates.length);
-    syncedCandidates.forEach((c, i) => {
-        // Usar optional chaining para evitar erros se as propriedades forem null/undefined
-        console.log(`  Candidato ${i}: ID=${c.id}, Nome="${c.nome}", Vaga=${c.vaga ? c.vaga[0]?.value : 'N/A'}`);
-        // Usar optional chaining para acessar as propriedades
-        console.log(`    Sexo: ${c.sexo || 'N/A'}, Escolaridade: ${c.escolaridade || 'N/A'}, Idade: ${c.idade || 'N/A'}`);
-    });
-
-
     res.json({ jobs: userJobs, candidates: syncedCandidates });
 
   } catch (error: any) {
@@ -427,19 +386,11 @@ app.get('/api/data/all/:userId', async (req: Request, res: Response) => {
   }
 });
 
-
-// --- Endpoint para upload de múltiplos currículos ---
 app.post('/api/upload-curriculums', upload.array('curriculumFiles'), async (req: Request, res: Response) => {
   const { jobId, userId } = req.body;
   const files = req.files as Express.Multer.File[];
 
-  console.log("Backend /api/upload-curriculums: Recebido");
-  console.log("  req.body:", req.body);
-  console.log("  req.files count:", files ? files.length : 0);
-
-
   if (!jobId || !userId || !files || files.length === 0) {
-    console.error("Backend Erro 400: jobId, userId ou arquivos ausentes.");
     return res.status(400).json({ error: 'Vaga, usuário e arquivos de currículo são obrigatórios.' });
   }
   
@@ -447,7 +398,6 @@ app.post('/api/upload-curriculums', upload.array('curriculumFiles'), async (req:
     const newCandidateEntries = [];
     for (const file of files) {
       if (file.size > 5 * 1024 * 1024) { 
-          console.error(`Backend Erro 400: Arquivo '${file.originalname}' muito grande.`);
           return res.status(400).json({ success: false, message: `O arquivo '${file.originalname}' é muito grande. O limite é de 5MB.` });
       }
 
@@ -456,8 +406,8 @@ app.post('/api/upload-curriculums', upload.array('curriculumFiles'), async (req:
       const newCandidateData = {
         nome: file.originalname.split('.')[0] || 'Novo Candidato',
         curriculo: [{ name: uploadedFile.name, url: uploadedFile.url }],
-        usuario: [parseInt(userId as string)], // Garante que userId seja um número
-        vaga: [parseInt(jobId as string)],     // Garante que jobId seja um número
+        usuario: [parseInt(userId as string)],
+        vaga: [parseInt(jobId as string)],
         score: null,
         resumo_ia: null,
         status: 'Triagem', 
@@ -467,17 +417,14 @@ app.post('/api/upload-curriculums', upload.array('curriculumFiles'), async (req:
       newCandidateEntries.push(createdCandidate);
     }
 
-    // Disparar UM ÚNICO webhook para o n8n com TODOS os candidatos em lote
-    const N8N_TRIAGEM_WEBHOOK_URL = 'https://webhook.focoserv.com.br/webhook/recrutamento'; // URL fornecida pelo usuário
+    const N8N_TRIAGEM_WEBHOOK_URL = 'https://webhook.focoserv.com.br/webhook/recrutamento';
     
-    // Buscar informações da vaga e do usuário logado APENAS UMA VEZ
     const jobInfo = await baserowServer.getRow(VAGAS_TABLE_ID, parseInt(jobId as string));
     const userInfo = await baserowServer.getRow(USERS_TABLE_ID, parseInt(userId as string));
 
     if (N8N_TRIAGEM_WEBHOOK_URL && newCandidateEntries.length > 0 && jobInfo && userInfo) {
       console.log('Disparando webhook em lote para o n8n (triagem de currículos)...');
       
-      // Mapear os candidatos criados para o formato do payload do webhook
       const candidatosParaWebhook = newCandidateEntries.map(candidate => ({
         id: candidate.id,
         nome: candidate.nome,
@@ -524,7 +471,6 @@ app.post('/api/upload-curriculums', upload.array('curriculumFiles'), async (req:
       }
     }
 
-
     res.json({ success: true, message: `${files.length} currículo(s) enviado(s) para análise!`, newCandidates: newCandidateEntries });
 
   } catch (error: any) {
@@ -533,7 +479,6 @@ app.post('/api/upload-curriculums', upload.array('curriculumFiles'), async (req:
   }
 });
 
-// --- Endpoint: Buscar Agendamentos do Usuário ---
 app.get('/api/schedules/:userId', async (req: Request, res: Response) => {
   const { userId } = req.params;
   if (!userId) {
@@ -542,14 +487,7 @@ app.get('/api/schedules/:userId', async (req: Request, res: Response) => {
 
   try {
     const { results } = await baserowServer.get(AGENDAMENTOS_TABLE_ID, `?filter__Candidato__usuario__link_row_has=${userId}`);
-    
-    console.log('Dados de agendamentos brutos do Baserow (Backend):');
-    results.forEach((item: any, index: number) => {
-        console.log(`  Agendamento ${index}: Título="${item.Título}", Vaga ID="${item.Vaga?.[0]?.id}", Vaga Value="${item.Vaga?.[0]?.value}"`);
-    });
-
     res.json({ success: true, results: results || [] });
-
   } catch (error: any) {
     console.error('Erro ao buscar agendamentos (backend):', error);
     res.status(500).json({ success: false, message: 'Falha ao buscar agendamentos.' });
@@ -560,52 +498,78 @@ app.get('/api/schedules/:userId', async (req: Request, res: Response) => {
 
 app.get('/api/google/auth/connect', (req: Request, res: Response) => {
   const { userId } = req.query;
-  if (!userId) return res.status(400).json({ error: 'userId é obrigatório' });
+  if (!userId) {
+    return res.status(400).json({ error: 'userId é obrigatório' });
+  }
 
   const scopes = ['https://www.googleapis.com/auth/calendar.events'];
+  
+  // CORREÇÃO AQUI: Garantindo 'prompt: consent' para sempre pedir autorização
+  // e 'access_type: offline' para solicitar o refresh_token.
   const url = oauth2Client.generateAuthUrl({
-    access_type: 'offline', scope: scopes, prompt: 'consent', state: userId.toString(),
+    access_type: 'offline',
+    scope: scopes,
+    prompt: 'consent', // Força a tela de consentimento do Google
+    state: userId.toString(),
   });
+
+  console.log(`[Google Auth] Gerando URL de autorização para userId: ${userId}`);
   res.json({ url });
 });
 
 app.get('/api/google/auth/callback', async (req: Request, res: Response) => {
-  const { code, state } = req.query;
-  const userId = state;
+  const { code, state: userId } = req.query;
   const closePopupScript = `<script>window.close();</script>`;
 
-  if (!code) {
-    console.error("Callback do Google recebido sem o código de autorização.");
+  if (!code || !userId) {
+    console.error("[Google Auth Callback] Erro: Código de autorização ou 'state' (userId) ausente na requisição.");
     return res.send(closePopupScript);
   }
+
+  console.log(`[Google Auth Callback] Recebido código para userId: ${userId}. Trocando por token...`);
 
   try {
     const { tokens } = await oauth2Client.getToken(code as string);
     const { refresh_token } = tokens;
 
-    if (typeof userId === 'string') {
-        if (refresh_token) {
-            console.log('Refresh Token obtido e será salvo para o usuário:', userId);
-            await baserowServer.patch(USERS_TABLE_ID, parseInt(userId), { google_refresh_token: refresh_token });
-        } else {
-            console.warn('Nenhum refresh_token foi recebido para o usuário:', userId);
-        }
+    // Log detalhado para depuração
+    console.log('[Google Auth Callback] Resposta de tokens recebida do Google:', tokens);
+
+    if (refresh_token) {
+      console.log(`[Google Auth Callback] SUCESSO! Refresh Token obtido para userId: ${userId}. Salvando no banco de dados...`);
+      
+      await baserowServer.patch(USERS_TABLE_ID, parseInt(userId as string), { 
+        google_refresh_token: refresh_token 
+      });
+
+      console.log(`[Google Auth Callback] Refresh Token para userId: ${userId} salvo com sucesso no Baserow.`);
+
     } else {
-        console.error('userId recebido não é uma string:', userId);
+      console.warn(`[Google Auth Callback] AVISO: Nenhum refresh_token foi recebido do Google para o userId: ${userId}. Isso pode acontecer se o usuário já autorizou o app anteriormente e não revogou o acesso. O token de acesso ainda pode funcionar para esta sessão.`);
     }
     
+    // Atualiza as credenciais do oauth2Client para a sessão atual
+    oauth2Client.setCredentials(tokens);
+
     res.send(closePopupScript);
 
-  } catch (error) {
-    console.error('--- ERRO DETALHADO NA TROCA DE TOKEN DO GOOGLE ---', error);
-    res.send(closePopupScript);
+  } catch (error: any) {
+    console.error('[Google Auth Callback] ERRO DETALHADO na troca de código por token:', error.response?.data || error.message);
+    res.status(500).send(`
+      <html><body>
+        <h1>Erro na Autenticação</h1>
+        <p>Houve um erro ao tentar conectar com o Google. Por favor, tente novamente.</p>
+        <p>Detalhes do erro: ${error.message}</p>
+        <button onclick="window.close()">Fechar</button>
+      </body></html>
+    `);
   }
 });
 
 app.post('/api/google/auth/disconnect', async (req: Request, res: Response) => {
     const { userId } = req.body;
     await baserowServer.patch(USERS_TABLE_ID, parseInt(userId), { google_refresh_token: null });
-    console.log(`Desconectando calendário para o usuário ${userId}`);
+    console.log(`[Google Auth] Desconectando calendário para o usuário ${userId}`);
     res.json({ success: true, message: 'Conta Google desconectada.' });
 });
 
@@ -632,7 +596,7 @@ app.post('/api/google/calendar/create-event', async (req: Request, res: Response
         const userResponse = await baserowServer.getRow(USERS_TABLE_ID, parseInt(userId));
         const refreshToken = userResponse.google_refresh_token;
         if (!refreshToken) {
-            return res.status(401).json({ success: false, message: 'Usuário não conectado ao Google Calendar.' });
+            return res.status(401).json({ success: false, message: 'Usuário não conectado ao Google Calendar. Por favor, conecte sua conta em "Configurações".' });
         }
         
         oauth2Client.setCredentials({ refresh_token: refreshToken });
@@ -653,10 +617,6 @@ app.post('/api/google/calendar/create-event', async (req: Request, res: Response
             calendarId: 'primary', requestBody: event,
         });
         
-        console.log('Evento criado no Google Calendar com sucesso. Resposta detalhada do Google:');
-        console.log(response.data);
-
-        // Salvar agendamento no Baserow
         await baserowServer.post(AGENDAMENTOS_TABLE_ID, {
           'Título': eventData.title,
           'Início': eventData.start,
@@ -667,9 +627,7 @@ app.post('/api/google/calendar/create-event', async (req: Request, res: Response
           'google_event_link': response.data.htmlLink
         });
 
-
         if (process.env.N8N_SCHEDULE_WEBHOOK_URL) {
-            console.log('Disparando webhook para o n8n...');
             const webhookPayload = {
                 recruiter: userResponse, candidate: candidate, job: job,
                 interview: {
@@ -683,7 +641,6 @@ app.post('/api/google/calendar/create-event', async (req: Request, res: Response
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(webhookPayload)
                 });
-                console.log('Webhook para n8n disparado com sucesso.');
             } catch (webhookError) {
                 console.error("Erro ao disparar o webhook para o n8n:", webhookError);
             }
