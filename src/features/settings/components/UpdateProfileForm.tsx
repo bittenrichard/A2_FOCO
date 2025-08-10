@@ -1,9 +1,11 @@
+// Local: src/features/settings/components/UpdateProfileForm.tsx
+
 import React, { useState, useEffect } from 'react';
 import { Upload, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
 import { UserProfile } from '../../auth/types';
-// Remova: import { baserow } from '../../../shared/services/baserowClient'; // REMOVA esta linha
 
-// Remova: const USERS_TABLE_ID = '711'; // REMOVA esta linha
+// Adicione esta linha no topo do arquivo.
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
 
 interface UpdateProfileFormProps {
   profile: UserProfile;
@@ -36,8 +38,9 @@ const UpdateProfileForm: React.FC<UpdateProfileFormProps> = ({ profile, onProfil
 
     try {
       const updatedData = { nome: name, empresa: company };
-      // Chame o backend para atualizar o perfil
-      const response = await fetch(`/api/users/${profile.id}/profile`, {
+      
+      // CORREÇÃO: Usando a URL completa da API
+      const response = await fetch(`${API_BASE_URL}/api/users/${profile.id}/profile`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updatedData),
@@ -50,7 +53,7 @@ const UpdateProfileForm: React.FC<UpdateProfileFormProps> = ({ profile, onProfil
       }
 
       setSuccessMessage('Perfil atualizado com sucesso!');
-      onProfileUpdate(data.user); // O backend deve retornar o perfil atualizado
+      onProfileUpdate(data.user);
     } catch (error: any) {
       setErrorMessage(error.message || 'Não foi possível atualizar o perfil. Tente novamente.');
       console.error(error);
@@ -70,19 +73,14 @@ const UpdateProfileForm: React.FC<UpdateProfileFormProps> = ({ profile, onProfil
             throw new Error("O arquivo é muito grande. O limite é de 2MB.");
         }
 
-        // ***** IMPORTANTE: A lógica de upload de arquivo precisa ser adaptada aqui *****
-        // Você precisará enviar o arquivo para o SEU backend, que por sua vez,
-        // irá chamar a API do Baserow para fazer o upload do arquivo.
-        // O código atual envia diretamente se baserowClient for exposto, o que NÃO É SEGURO.
-
-        // Exemplo de como você FARIA a chamada para o seu backend (AJUSTE NECESSÁRIO NO BACKEND):
         const formData = new FormData();
-        formData.append('avatar', file); // 'avatar' é o nome do campo que seu backend espera
-        formData.append('userId', String(profile.id)); // Envia o ID do usuário se o backend precisar para associar o avatar
+        formData.append('avatar', file);
+        formData.append('userId', String(profile.id));
 
-        const response = await fetch('/api/upload-avatar', { // NOVO ENDPOINT NO SEU BACKEND
+        // CORREÇÃO: Usando a URL completa da API
+        const response = await fetch(`${API_BASE_URL}/api/upload-avatar`, {
             method: 'POST',
-            body: formData, // FormData não precisa de Content-Type manual
+            body: formData,
         });
 
         const data = await response.json();
@@ -91,12 +89,8 @@ const UpdateProfileForm: React.FC<UpdateProfileFormProps> = ({ profile, onProfil
             throw new Error(data.error || "Não foi possível enviar a foto. Tente novamente.");
         }
         
-        const newAvatarUrl = data.avatar_url; // Seu backend retornaria a URL do avatar
+        const newAvatarUrl = data.avatar_url;
         
-        // A Baserow.patch no servidor já foi adicionada no endpoint de perfil.
-        // Se o seu endpoint /api/upload-avatar já atualiza o perfil, não precisa de outra patch aqui.
-        // Assumindo que o endpoint de upload retorna a URL do avatar e já atualiza o perfil no Baserow.
-
         setAvatarUrl(newAvatarUrl);
         onProfileUpdate({ avatar_url: newAvatarUrl });
         setSuccessMessage("Foto de perfil atualizada com sucesso!");
