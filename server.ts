@@ -30,7 +30,6 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-
 if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET || !process.env.GOOGLE_REDIRECT_URI) {
   console.error("ERRO CRÍTICO: As credenciais do Google não foram encontradas...");
   process.exit(1);
@@ -601,15 +600,9 @@ app.post('/api/assessment/:assessmentId/submit', async (req: Request, res: Respo
             analista: total > 0 ? parseFloat(((scores.A / total) * 100).toFixed(2)) : 0,
         };
         
-        const resultRecord = await baserowServer.post(RESULTADOS_TABLE_ID, {
-            avaliacao: [parseInt(assessmentId)], ...finalScores,
-            respostas_passo1: JSON.stringify(passo1), respostas_passo2: JSON.stringify(passo2), respostas_passo3: JSON.stringify(passo3),
-        });
-        await baserowServer.patch(AVALIACOES_TABLE_ID, parseInt(assessmentId), { status: 'Concluído' });
-        
-        (async () => {
-            try {
-                const prompt = `
+        let analiseIA = JSON.stringify({ error: "Falha ao gerar análise da IA." });
+        try {
+            const prompt = `
 # PERSONA
 Você é um Analista Comportamental Sênior, especialista certificado na metodologia DISC. Sua comunicação é clara, objetiva e sempre construtiva. Sua análise vai além dos rótulos, focando em como os traços se manifestam no ambiente de trabalho.
 # OBJETIVO
@@ -653,17 +646,19 @@ Sua resposta final deve ser **APENAS** o objeto JSON abaixo, sem textos ou expli
 }
 \`\`\`
 `;
-                const completion = await openai.chat.completions.create({ model: 'gpt-4o-mini', messages: [{ role: 'user', content: prompt }], temperature: 0.0, response_format: { type: "json_object" } });
-                const analiseIA = completion.choices[0].message.content;
-                if (analiseIA) {
-                    await baserowServer.patch(RESULTADOS_TABLE_ID, resultRecord.id, { analise_ia: analiseIA });
-                }
-            } catch (aiError) {
-                console.error("Erro na chamada para a OpenAI (em segundo plano):", aiError);
-                const errorJson = JSON.stringify({ error: "Falha ao gerar análise da IA." });
-                await baserowServer.patch(RESULTADOS_TABLE_ID, resultRecord.id, { analise_ia: errorJson });
-            }
-        })();
+            const completion = await openai.chat.completions.create({ model: 'gpt-4o-mini', messages: [{ role: 'user', content: prompt }], temperature: 0.0, response_format: { type: "json_object" } });
+            analiseIA = completion.choices[0].message.content || analiseIA;
+        } catch (aiError) {
+            console.error("Erro na chamada para a OpenAI:", aiError);
+        }
+        
+        await baserowServer.post(RESULTADOS_TABLE_ID, {
+            avaliacao: [parseInt(assessmentId)], ...finalScores,
+            respostas_passo1: JSON.stringify(passo1), respostas_passo2: JSON.stringify(passo2), respostas_passo3: JSON.stringify(passo3),
+            analise_ia: analiseIA
+        });
+        await baserowServer.patch(AVALIACOES_TABLE_ID, parseInt(assessmentId), { status: 'Concluído' });
+        
         res.status(200).json({ success: true, message: "Avaliação concluída com sucesso!" });
     } catch (error) {
         console.error("Erro ao submeter avaliação:", error);
@@ -677,9 +672,7 @@ app.get('/api/assessment/result/:assessmentId', async (req: Request, res: Respon
         const { results } = await baserowServer.get(RESULTADOS_TABLE_ID, `?filter__avaliacao__link_row_has=${assessmentId}`);
         if (results && results.length > 0) {
             const profileData = results[0];
-            try {
-                profileData.analise_ia = JSON.parse(profileData.analise_ia);
-            } catch (e) { /* Se não for JSON, mantém como texto */ }
+            try { profileData.analise_ia = JSON.parse(profileData.analise_ia); } catch (e) {}
             res.json({ success: true, result: profileData });
         } else {
             res.status(404).json({ error: "Resultado da avaliação não encontrado." });
@@ -691,14 +684,10 @@ app.get('/api/assessment/result/:assessmentId', async (req: Request, res: Respon
 
 app.get('/api/candidates/:candidateId/behavioral-profile', async (req: Request, res: Response) => {
     const { candidateId } = req.params;
-    if (!candidateId) {
-        return res.status(400).json({ error: 'ID do candidato é obrigatório.' });
-    }
+    if (!candidateId) { return res.status(400).json({ error: 'ID do candidato é obrigatório.' }); }
     try {
         const { results: avaliacoes } = await baserowServer.get(AVALIACOES_TABLE_ID, `?filter__candidato__link_row_has=${candidateId}`);
-        if (!avaliacoes || avaliacoes.length === 0) {
-            return res.json({ success: true, profile: null });
-        }
+        if (!avaliacoes || avaliacoes.length === 0) { return res.json({ success: true, profile: null }); }
         const avaliacaoId = avaliacoes[0].id;
         const { results: resultados } = await baserowServer.get(RESULTADOS_TABLE_ID, `?filter__avaliacao__link_row_has=${avaliacaoId}`);
         if (resultados && resultados.length > 0) {

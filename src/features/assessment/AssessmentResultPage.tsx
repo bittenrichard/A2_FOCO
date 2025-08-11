@@ -18,7 +18,7 @@ interface ProfileResult {
     resumo_comportamental: string;
     pontos_fortes_contextuais: string[];
     pontos_de_atencao: string[];
-    error?: string; // Para o caso de falha da IA
+    error?: string;
   } | null;
 }
 
@@ -43,30 +43,20 @@ const AssessmentResultPage: React.FC = () => {
         setIsLoading(false);
       }
     };
-    
-    // Tenta buscar o resultado imediatamente e depois a cada 5 segundos se a análise da IA não estiver pronta
-    fetchResult();
-    const interval = setInterval(() => {
-        setResult(prevResult => {
-            if (prevResult && !prevResult.analise_ia) {
-                fetchResult();
-            }
-            return prevResult;
-        });
-    }, 5000);
 
-    // Limpa o intervalo quando o componente é desmontado ou quando a análise chega
-    return () => {
-        clearInterval(interval);
-    };
-  }, [assessmentId]);
+    const intervalId = setInterval(() => {
+        // Para o polling quando os dados chegam ou se houver erro
+        if (result || error) {
+            clearInterval(intervalId);
+            return;
+        }
+        fetchResult();
+    }, 5000); // Tenta a cada 5 segundos
 
-  useEffect(() => {
-      if(result && result.analise_ia) {
-          // Para o polling quando a analise_ia estiver presente
-          // (a lógica no return do primeiro useEffect já faz isso, mas é uma segurança extra)
-      }
-  }, [result]);
+    fetchResult(); // Busca inicial
+    return () => clearInterval(intervalId); // Limpa o intervalo ao sair da página
+  }, [assessmentId, result, error]);
+
 
   if (isLoading) {
     return (
