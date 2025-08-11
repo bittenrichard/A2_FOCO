@@ -638,4 +638,3 @@ app.post('/api/google/calendar/create-event', async (req: Request, res: Response
 app.listen(port, () => {
   console.log(`Backend rodando em http://localhost:${port}`);
 });
-}
