@@ -30,7 +30,6 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-
 if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET || !process.env.GOOGLE_REDIRECT_URI) {
   console.error("ERRO CRÍTICO: As credenciais do Google não foram encontradas...");
   process.exit(1);
@@ -73,26 +72,40 @@ interface BaserowCandidate {
   idade?: number | null;
 }
 
-// --- ROTAS DE AUTENTICAÇÃO ---
 app.post('/api/auth/signup', async (req: Request, res: Response) => {
   const { nome, empresa, telefone, email, password } = req.body;
   if (!email || !password || !nome) {
     return res.status(400).json({ error: 'Nome, email e senha são obrigatórios.' });
   }
+
   try {
     const emailLowerCase = email.toLowerCase();
     const { results: existingUsers } = await baserowServer.get(USERS_TABLE_ID, `?filter__Email__equal=${emailLowerCase}`);
+
     if (existingUsers && existingUsers.length > 0) {
       return res.status(409).json({ error: 'Este e-mail já está cadastrado.' });
     }
+
     const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS);
+
     const newUser = await baserowServer.post(USERS_TABLE_ID, {
-      nome, empresa, telefone, Email: emailLowerCase, senha_hash: hashedPassword,
+      nome,
+      empresa,
+      telefone,
+      Email: emailLowerCase,
+      senha_hash: hashedPassword,
     });
+
     const userProfile = {
-      id: newUser.id, nome: newUser.nome, email: newUser.Email, empresa: newUser.empresa, telefone: newUser.telefone,
-      avatar_url: newUser.avatar_url || null, google_refresh_token: newUser.google_refresh_token || null,
+      id: newUser.id,
+      nome: newUser.nome,
+      email: newUser.Email,
+      empresa: newUser.empresa,
+      telefone: newUser.telefone,
+      avatar_url: newUser.avatar_url || null,
+      google_refresh_token: newUser.google_refresh_token || null,
     };
+
     res.status(201).json({ success: true, user: userProfile });
   } catch (error: any) {
     console.error('Erro no registro (backend):', error);
@@ -105,18 +118,27 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
   if (!email || !password) {
     return res.status(400).json({ error: 'Email e senha são obrigatórios.' });
   }
+
   try {
     const emailLowerCase = email.toLowerCase();
     const { results: users } = await baserowServer.get(USERS_TABLE_ID, `?filter__Email__equal=${emailLowerCase}`);
     const user = users && users[0];
+
     if (!user || !user.senha_hash) {
       return res.status(401).json({ error: 'E-mail ou senha inválidos.' });
     }
+
     const passwordMatches = await bcrypt.compare(password, user.senha_hash);
+
     if (passwordMatches) {
       const userProfile = {
-        id: user.id, nome: user.nome, email: user.Email, empresa: user.empresa, telefone: user.telefone,
-        avatar_url: user.avatar_url || null, google_refresh_token: user.google_refresh_token || null,
+        id: user.id,
+        nome: user.nome,
+        email: user.Email,
+        empresa: user.empresa,
+        telefone: user.telefone,
+        avatar_url: user.avatar_url || null,
+        google_refresh_token: user.google_refresh_token || null,
       };
       res.json({ success: true, user: userProfile });
     } else {
@@ -128,26 +150,36 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
   }
 });
 
-// --- ROTAS DE USUÁRIO E PERFIL ---
 app.patch('/api/users/:userId/profile', async (req: Request, res: Response) => {
   const { userId } = req.params;
   const { nome, empresa, avatar_url } = req.body;
+
   if (!userId) {
     return res.status(400).json({ error: 'ID do usuário é obrigatório.' });
   }
+
   try {
     const updatedData: Record<string, any> = {};
     if (nome !== undefined) updatedData.nome = nome;
     if (empresa !== undefined) updatedData.empresa = empresa;
     if (avatar_url !== undefined) updatedData.avatar_url = avatar_url;
+
     if (Object.keys(updatedData).length === 0) {
       return res.status(400).json({ error: 'Nenhum dado para atualizar.' });
     }
+
     const updatedUser = await baserowServer.patch(USERS_TABLE_ID, parseInt(userId), updatedData);
+
     const userProfile = {
-      id: updatedUser.id, nome: updatedUser.nome, email: updatedUser.Email, empresa: updatedUser.empresa, telefone: updatedUser.telefone,
-      avatar_url: updatedUser.avatar_url || null, google_refresh_token: updatedUser.google_refresh_token || null,
+      id: updatedUser.id,
+      nome: updatedUser.nome,
+      email: updatedUser.Email,
+      empresa: updatedUser.empresa,
+      telefone: updatedUser.telefone,
+      avatar_url: updatedUser.avatar_url || null,
+      google_refresh_token: updatedUser.google_refresh_token || null,
     };
+
     res.status(200).json({ success: true, user: userProfile });
   } catch (error: any) {
     console.error('Erro ao atualizar perfil (backend):', error);
@@ -158,12 +190,14 @@ app.patch('/api/users/:userId/profile', async (req: Request, res: Response) => {
 app.patch('/api/users/:userId/password', async (req: Request, res: Response) => {
   const { userId } = req.params;
   const { password } = req.body;
+
   if (!userId || !password) {
     return res.status(400).json({ error: 'ID do usuário e nova senha são obrigatórios.' });
   }
   if (password.length < 6) {
     return res.status(400).json({ error: 'A senha deve ter no mínimo 6 caracteres.' });
   }
+
   try {
     const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS);
     await baserowServer.patch(USERS_TABLE_ID, parseInt(userId), { senha_hash: hashedPassword });
@@ -185,8 +219,13 @@ app.get('/api/users/:userId', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Usuário não encontrado.' });
     }
     const userProfile = {
-      id: user.id, nome: user.nome, email: user.Email, empresa: user.empresa, telefone: user.telefone,
-      avatar_url: user.avatar_url || null, google_refresh_token: user.google_refresh_token || null,
+      id: user.id,
+      nome: user.nome,
+      email: user.Email,
+      empresa: user.empresa,
+      telefone: user.telefone,
+      avatar_url: user.avatar_url || null,
+      google_refresh_token: user.google_refresh_token || null,
     };
     res.json(userProfile);
   } catch (error: any) {
@@ -200,33 +239,48 @@ app.post('/api/upload-avatar', upload.single('avatar'), async (req: Request, res
   if (!userId || !req.file) {
     return res.status(400).json({ error: 'Arquivo e ID do usuário são obrigatórios.' });
   }
+
   try {
     const fileBuffer = req.file.buffer;
     const fileName = req.file.originalname;
     const mimetype = req.file.mimetype;
+
     const uploadedFile = await baserowServer.uploadFileFromBuffer(fileBuffer, fileName, mimetype);
     const newAvatarUrl = uploadedFile.url;
+
     const updatedUser = await baserowServer.patch(USERS_TABLE_ID, parseInt(userId), { avatar_url: newAvatarUrl });
+
     const userProfile = {
-      id: updatedUser.id, nome: updatedUser.nome, email: updatedUser.Email, empresa: updatedUser.empresa,
-      telefone: updatedUser.telefone, avatar_url: updatedUser.avatar_url || null, google_refresh_token: updatedUser.google_refresh_token || null,
+      id: updatedUser.id,
+      nome: updatedUser.nome,
+      email: updatedUser.Email,
+      empresa: updatedUser.empresa,
+      telefone: updatedUser.telefone,
+      avatar_url: updatedUser.avatar_url || null,
+      google_refresh_token: updatedUser.google_refresh_token || null,
     };
     res.json({ success: true, avatar_url: newAvatarUrl, user: userProfile });
+
   } catch (error: any) {
     console.error('Erro ao fazer upload de avatar (backend):', error);
     res.status(500).json({ error: error.message || 'Não foi possível fazer upload do avatar.' });
   }
 });
 
-// --- ROTAS DE VAGAS E CANDIDATOS ---
 app.post('/api/jobs', async (req: Request, res: Response) => {
   const { titulo, descricao, endereco, requisitos_obrigatorios, requisitos_desejaveis, usuario } = req.body;
   if (!titulo || !descricao || !usuario || usuario.length === 0) {
     return res.status(400).json({ error: 'Título, descrição e ID do usuário são obrigatórios.' });
   }
+
   try {
     const createdJob = await baserowServer.post(VAGAS_TABLE_ID, {
-      titulo, descricao, Endereco: endereco, requisitos_obrigatorios, requisitos_desejaveis, usuario,
+      titulo,
+      descricao,
+      Endereco: endereco,
+      requisitos_obrigatorios,
+      requisitos_desejaveis,
+      usuario,
     });
     res.status(201).json(createdJob);
   } catch (error: any) {
@@ -241,6 +295,7 @@ app.patch('/api/jobs/:jobId', async (req: Request, res: Response) => {
   if (!jobId || Object.keys(updatedData).length === 0) {
     return res.status(400).json({ error: 'ID da vaga e dados para atualização são obrigatórios.' });
   }
+
   try {
     const updatedJob = await baserowServer.patch(VAGAS_TABLE_ID, parseInt(jobId), updatedData);
     res.json(updatedJob);
@@ -255,6 +310,7 @@ app.delete('/api/jobs/:jobId', async (req: Request, res: Response) => {
   if (!jobId) {
     return res.status(400).json({ error: 'ID da vaga é obrigatório.' });
   }
+
   try {
     await baserowServer.delete(VAGAS_TABLE_ID, parseInt(jobId));
     res.status(204).send();
@@ -267,13 +323,16 @@ app.delete('/api/jobs/:jobId', async (req: Request, res: Response) => {
 app.patch('/api/candidates/:candidateId/status', async (req: Request, res: Response) => {
   const { candidateId } = req.params;
   const { status } = req.body;
+
   if (!candidateId || !status) {
     return res.status(400).json({ error: 'ID do candidato e status são obrigatórios.' });
   }
+
   const validStatuses = ['Triagem', 'Entrevista', 'Aprovado', 'Reprovado'];
   if (!validStatuses.includes(status)) {
     return res.status(400).json({ error: 'Status inválido fornecido.' });
   }
+
   try {
     const updatedCandidate = await baserowServer.patch(CANDIDATOS_TABLE_ID, parseInt(candidateId), { status: status });
     res.json(updatedCandidate);
@@ -283,67 +342,71 @@ app.patch('/api/candidates/:candidateId/status', async (req: Request, res: Respo
   }
 });
 
-// --- ROTA PRINCIPAL DE DADOS ---
 app.get('/api/data/all/:userId', async (req: Request, res: Response) => {
-    const { userId } = req.params;
-    if (!userId) {
-        return res.status(400).json({ error: 'ID do usuário é obrigatório.' });
-    }
-    try {
-        const jobsResult = await baserowServer.get(VAGAS_TABLE_ID, '');
-        const allJobs: BaserowJobPosting[] = (jobsResult.results || []) as BaserowJobPosting[];
-        const userJobs = allJobs.filter((job: BaserowJobPosting) =>
-            job.usuario && job.usuario.some((user: any) => user.id === parseInt(userId))
-        );
-        const userJobIds = new Set(userJobs.map(job => job.id));
-        const jobsMapByTitle = new Map<string, BaserowJobPosting>(userJobs.map((job: BaserowJobPosting) => [job.titulo.toLowerCase().trim(), job]));
-        const jobsMapById = new Map<number, BaserowJobPosting>(userJobs.map((job: BaserowJobPosting) => [job.id, job]));
+  const { userId } = req.params;
+  if (!userId) {
+    return res.status(400).json({ error: 'ID do usuário é obrigatório.' });
+  }
 
-        const regularCandidatesResult = await baserowServer.get(CANDIDATOS_TABLE_ID, '');
-        const whatsappCandidatesResult = await baserowServer.get(WHATSAPP_CANDIDATOS_TABLE_ID, '');
-        const allCandidatesRaw: BaserowCandidate[] = [
-            ...(regularCandidatesResult.results || []),
-            ...(whatsappCandidatesResult.results || [])
-        ] as BaserowCandidate[];
+  try {
+    const jobsResult = await baserowServer.get(VAGAS_TABLE_ID, '');
+    const allJobs: BaserowJobPosting[] = (jobsResult.results || []) as BaserowJobPosting[];
+    const userJobs = allJobs.filter((job: BaserowJobPosting) =>
+      job.usuario && job.usuario.some((user: any) => user.id === parseInt(userId))
+    );
 
-        const userCandidatesRaw = allCandidatesRaw.filter((candidate: BaserowCandidate) => {
-            if (candidate.usuario && candidate.usuario.some((u: any) => u.id === parseInt(userId))) return true;
-            if (typeof candidate.vaga === 'string' && candidate.vaga) {
-                const jobMatch = jobsMapByTitle.get(candidate.vaga.toLowerCase().trim());
-                return !!jobMatch;
-            }
-            if (candidate.vaga && Array.isArray(candidate.vaga) && candidate.vaga.length > 0) {
-                const vagaId = (candidate.vaga[0] as { id: number; value: string }).id;
-                return userJobIds.has(vagaId);
-            }
-            return false;
-        });
+    const userJobIds = new Set(userJobs.map(job => job.id));
+    const jobsMapByTitle = new Map<string, BaserowJobPosting>(userJobs.map((job: BaserowJobPosting) => [job.titulo.toLowerCase().trim(), job]));
+    const jobsMapById = new Map<number, BaserowJobPosting>(userJobs.map((job: BaserowJobPosting) => [job.id, job]));
 
-        const syncedCandidates = userCandidatesRaw.map((candidate: BaserowCandidate) => {
-            const newCandidate = { ...candidate };
-            let vagaLink: { id: number; value: string }[] | null = null;
-            if (typeof candidate.vaga === 'string' && candidate.vaga) {
-                const jobMatch = jobsMapByTitle.get(candidate.vaga.toLowerCase().trim());
-                if (jobMatch) {
-                    vagaLink = [{ id: jobMatch.id, value: jobMatch.titulo }];
-                }
-            } else if (candidate.vaga && Array.isArray(candidate.vaga) && candidate.vaga.length > 0) {
-                const linkedVaga = candidate.vaga[0] as { id: number; value: string };
-                if (jobsMapById.has(linkedVaga.id)) {
-                    vagaLink = [{ id: linkedVaga.id, value: linkedVaga.value }];
-                }
-            }
-            return { ...newCandidate, vaga: vagaLink };
-        });
+    const regularCandidatesResult = await baserowServer.get(CANDIDATOS_TABLE_ID, '');
+    const whatsappCandidatesResult = await baserowServer.get(WHATSAPP_CANDIDATOS_TABLE_ID, '');
 
-        res.json({ jobs: userJobs, candidates: syncedCandidates });
-    } catch (error: any) {
-        console.error('Erro ao buscar todos os dados (backend):', error);
-        res.status(500).json({ error: 'Falha ao carregar dados.' });
-    }
+    const allCandidatesRaw: BaserowCandidate[] = [
+      ...(regularCandidatesResult.results || []),
+      ...(whatsappCandidatesResult.results || [])
+    ] as BaserowCandidate[];
+
+    const userCandidatesRaw = allCandidatesRaw.filter((candidate: BaserowCandidate) => {
+      if (candidate.usuario && candidate.usuario.some((u: any) => u.id === parseInt(userId))) {
+        return true;
+      }
+      if (typeof candidate.vaga === 'string' && candidate.vaga) {
+        const jobMatch = jobsMapByTitle.get(candidate.vaga.toLowerCase().trim());
+        return !!jobMatch;
+      }
+      if (candidate.vaga && Array.isArray(candidate.vaga) && candidate.vaga.length > 0) {
+        const vagaId = (candidate.vaga[0] as { id: number; value: string }).id;
+        return userJobIds.has(vagaId);
+      }
+      return false;
+    });
+
+    const syncedCandidates = userCandidatesRaw.map((candidate: BaserowCandidate) => {
+      const newCandidate = { ...candidate };
+      let vagaLink: { id: number; value: string }[] | null = null;
+      if (typeof candidate.vaga === 'string' && candidate.vaga) {
+        const jobMatch = jobsMapByTitle.get(candidate.vaga.toLowerCase().trim());
+        if (jobMatch) {
+          vagaLink = [{ id: jobMatch.id, value: jobMatch.titulo }];
+        }
+      } else if (candidate.vaga && Array.isArray(candidate.vaga) && candidate.vaga.length > 0) {
+        const linkedVaga = candidate.vaga[0] as { id: number; value: string };
+        if (jobsMapById.has(linkedVaga.id)) {
+          vagaLink = [{ id: linkedVaga.id, value: linkedVaga.value }];
+        }
+      }
+      return { ...newCandidate, vaga: vagaLink };
+    });
+
+    res.json({ jobs: userJobs, candidates: syncedCandidates });
+
+  } catch (error: any) {
+    console.error('Erro ao buscar todos os dados (backend):', error);
+    res.status(500).json({ error: 'Falha ao carregar dados.' });
+  }
 });
 
-// --- ROTA DE UPLOAD DE CURRÍCULOS ---
 app.post('/api/upload-curriculums', upload.array('curriculumFiles'), async (req: Request, res: Response) => {
   const { jobId, userId } = req.body;
   const files = req.files as Express.Multer.File[];
@@ -356,13 +419,19 @@ app.post('/api/upload-curriculums', upload.array('curriculumFiles'), async (req:
       if (file.size > 5 * 1024 * 1024) {
         return res.status(400).json({ success: false, message: `O arquivo '${file.originalname}' é muito grande. O limite é de 5MB.` });
       }
+
       const uploadedFile = await baserowServer.uploadFileFromBuffer(file.buffer, file.originalname, file.mimetype);
+
       const newCandidateData = {
         nome: file.originalname.split('.')[0] || 'Novo Candidato',
         curriculo: [{ name: uploadedFile.name, url: uploadedFile.url }],
-        usuario: [parseInt(userId as string)], vaga: [parseInt(jobId as string)],
-        score: null, resumo_ia: null, status: 'Triagem',
+        usuario: [parseInt(userId as string)],
+        vaga: [parseInt(jobId as string)],
+        score: null,
+        resumo_ia: null,
+        status: 'Triagem',
       };
+
       const createdCandidate = await baserowServer.post(CANDIDATOS_TABLE_ID, newCandidateData);
       newCandidateEntries.push(createdCandidate);
     }
@@ -373,7 +442,6 @@ app.post('/api/upload-curriculums', upload.array('curriculumFiles'), async (req:
   }
 });
 
-// --- ROTAS DE AGENDA E GOOGLE CALENDAR ---
 app.get('/api/schedules/:userId', async (req: Request, res: Response) => {
   const { userId } = req.params;
   if (!userId) {
@@ -465,23 +533,18 @@ app.post('/api/google/calendar/create-event', async (req: Request, res: Response
 });
 
 // --- NOVA FEATURE: PERFIL COMPORTAMENTAL ---
+
 const adjetivos = [
-  'Alegre', 'Animado', 'Anti-Social', 'Arrogante', 'Ativo', 'Bem-Quisto', 'Bom Companheiro',
-  'Calculista', 'Calmo', 'Compreensivo', 'Cumpridor', 'Decidido', 'Dedicado', 'Depressivo',
-  'Desconfiado', 'Egocêntrico', 'Egoísta', 'Empolgante', 'Enérgico', 'Entusiasta',
-  'Estrovertido', 'Exuberante', 'Firme', 'Frio', 'Habilidoso', 'Inflexível', 'Influenciador',
-  'Ingênuo', 'Inseguro', 'Insensível', 'Audacioso (Ousado)', 'Auto-Disciplinado',
-  'Auto-Suficiente', 'Barulhento', 'Bem-Humorado', 'Comunicativo', 'Conservador',
-  'Contagiante', 'Corajoso', 'Crítico', 'Desmotivado', 'Desorganizado', 'Destacado',
-  'Discreto', 'Eficiente', 'Equilibrado', 'Espalhafatoso', 'Estimulante', 'Exagerado',
-  'Exigente', 'Idealista', 'Impaciente', 'Indeciso', 'Independente', 'Indisciplinado',
-  'Intolerante', 'Introvertido', 'Leal', 'Líder', 'Medroso', 'Minucioso', 'Modesto',
-  'Orgulhoso', 'Otimista', 'Paciente', 'Perfeccionista', 'Persistente', 'Pessimista',
-  'Popular', 'Prático', 'Pretensioso', 'Procrastinador', 'Racional', 'Reservado',
-  'Resoluto (Decidido)', 'Rotineiro', 'Sarcástico', 'Sensível', 'Sentimental', 'Simpático',
+  'Alegre', 'Animado', 'Anti-Social', 'Arrogante', 'Ativo', 'Bem-Quisto', 'Bom Companheiro', 'Calculista', 'Calmo', 'Compreensivo',
+  'Cumpridor', 'Decidido', 'Dedicado', 'Depressivo', 'Desconfiado', 'Egocêntrico', 'Egoísta', 'Empolgante', 'Enérgico', 'Entusiasta',
+  'Estrovertido', 'Exuberante', 'Firme', 'Frio', 'Habilidoso', 'Inflexível', 'Influenciador', 'Ingênuo', 'Inseguro', 'Insensível',
+  'Audacioso (Ousado)', 'Auto-Disciplinado', 'Auto-Suficiente', 'Barulhento', 'Bem-Humorado', 'Comunicativo', 'Conservador', 'Contagiante', 'Corajoso',
+  'Crítico', 'Desmotivado', 'Desorganizado', 'Destacado', 'Discreto', 'Eficiente', 'Equilibrado', 'Espalhafatoso', 'Estimulante', 'Exagerado', 'Exigente',
+  'Idealista', 'Impaciente', 'Indeciso', 'Independente', 'Indisciplinado', 'Intolerante', 'Introvertido', 'Leal', 'Líder', 'Medroso',
+  'Minucioso', 'Modesto', 'Orgulhoso', 'Otimista', 'Paciente', 'Perfeccionista', 'Persistente', 'Pessimista', 'Popular', 'Prático',
+  'Pretensioso', 'Procrastinador', 'Racional', 'Reservado', 'Resoluto (Decidido)', 'Rotineiro', 'Sarcástico', 'Sensível', 'Sentimental', 'Simpático',
   'Sincero', 'Temeroso', 'Teórico', 'Tranquilo', 'Vaidoso', 'Vingativo'
 ];
-
 const perfilMap: { [key: string]: string } = {
     'Audacioso (Ousado)': 'E', 'Líder': 'E', 'Exigente': 'E', 'Decidido': 'E', 'Independente': 'E', 'Corajoso': 'E', 'Firme': 'E', 'Ativo': 'E', 'Enérgico': 'E',
     'Comunicativo': 'C', 'Popular': 'C', 'Entusiasta': 'C', 'Otimista': 'C', 'Contagiante': 'C', 'Influenciador': 'C', 'Alegre': 'C', 'Animado': 'C', 'Simpático': 'C',
@@ -536,24 +599,29 @@ app.post('/api/assessment/:assessmentId/submit', async (req: Request, res: Respo
             planejador: total > 0 ? parseFloat(((scores.P / total) * 100).toFixed(2)) : 0,
             analista: total > 0 ? parseFloat(((scores.A / total) * 100).toFixed(2)) : 0,
         };
-        let analiseIA = JSON.stringify({ error: "Análise da IA não foi gerada." });
-        try {
-            const prompt = `Baseado na metodologia DISC, analise o seguinte perfil comportamental de um candidato:\nScores Percentuais:\n- Executor (Dominância): ${finalScores.executor}%\n- Comunicador (Influência): ${finalScores.comunicador}%\n- Planejador (Estabilidade): ${finalScores.planejador}%\n- Analista (Conformidade): ${finalScores.analista}%\n\nAdjetivos selecionados pelo candidato que descrevem sua personalidade: ${passo1.join(', ')}.\nAdjetivos que representam sua motivação: ${passo2.join(', ')}.\nAdjetivos sobre como ele acha que os outros o veem: ${passo3.join(', ')}.\n\nPor favor, retorne uma análise em formato JSON com a seguinte estrutura:\n{\n  "perfil_principal": "Nome do perfil dominante (ou 'Equilibrado' se não houver um claro dominante)",\n  "resumo": "Um parágrafo curto resumindo o comportamento geral do candidato.",\n  "pontos_fortes": ["Um", "array", "com", "3 a 5", "pontos fortes chave"],\n  "pontos_a_desenvolver": ["Um", "array", "com", "3 a 5", "pontos de atenção ou a desenvolver"]\n}`;
-            const completion = await openai.chat.completions.create({
-                model: 'gpt-4o-mini', messages: [{ role: 'user', content: prompt }], temperature: 0.0, response_format: { type: "json_object" }
-            });
-            analiseIA = completion.choices[0].message.content || analiseIA;
-        } catch (aiError) {
-            console.error("Erro na chamada para a OpenAI:", aiError);
-        }
-        await baserowServer.post(RESULTADOS_TABLE_ID, {
+        
+        const resultRecord = await baserowServer.post(RESULTADOS_TABLE_ID, {
             avaliacao: [parseInt(assessmentId)], ...finalScores,
             respostas_passo1: JSON.stringify(passo1), respostas_passo2: JSON.stringify(passo2), respostas_passo3: JSON.stringify(passo3),
-            analise_ia: analiseIA
         });
         await baserowServer.patch(AVALIACOES_TABLE_ID, parseInt(assessmentId), { status: 'Concluído' });
+        
+        (async () => {
+            try {
+                const prompt = `Baseado na metodologia DISC, analise o seguinte perfil comportamental de um candidato:\nScores Percentuais:\n- Executor (Dominância): ${finalScores.executor}%\n- Comunicador (Influência): ${finalScores.comunicador}%\n- Planejador (Estabilidade): ${finalScores.planejador}%\n- Analista (Conformidade): ${finalScores.analista}%\n\nAdjetivos selecionados pelo candidato que descrevem sua personalidade: ${passo1.join(', ')}.\nAdjetivos que representam sua motivação: ${passo2.join(', ')}.\nAdjetivos sobre como ele acha que os outros o veem: ${passo3.join(', ')}.\n\nPor favor, retorne uma análise em formato JSON com a seguinte estrutura:\n{\n  "perfil_principal": "Nome do perfil dominante (ou 'Equilibrado' se não houver um claro dominante)",\n  "resumo": "Um parágrafo curto resumindo o comportamento geral do candidato.",\n  "pontos_fortes": ["Um", "array", "com", "3 a 5", "pontos fortes chave"],\n  "pontos_a_desenvolver": ["Um", "array", "com", "3 a 5", "pontos de atenção ou a desenvolver"]\n}`;
+                const completion = await openai.chat.completions.create({ model: 'gpt-4o-mini', messages: [{ role: 'user', content: prompt }], temperature: 0.0, response_format: { type: "json_object" } });
+                const analiseIA = completion.choices[0].message.content;
+                if (analiseIA) {
+                    await baserowServer.patch(RESULTADOS_TABLE_ID, resultRecord.id, { analise_ia: analiseIA });
+                }
+            } catch (aiError) {
+                console.error("Erro na chamada para a OpenAI (em segundo plano):", aiError);
+                await baserowServer.patch(RESULTADOS_TABLE_ID, resultRecord.id, { analise_ia: JSON.stringify({ error: "Falha ao gerar análise da IA." }) });
+            }
+        })();
         res.status(200).json({ success: true, message: "Avaliação concluída com sucesso!" });
     } catch (error) {
+        console.error("Erro ao submeter avaliação:", error);
         res.status(500).json({ error: 'Não foi possível processar sua avaliação.' });
     }
 });

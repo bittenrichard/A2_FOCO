@@ -17,7 +17,7 @@ interface ProfileResult {
     resumo: string;
     pontos_fortes: string[];
     pontos_a_desenvolver: string[];
-  };
+  } | null;
 }
 
 const AssessmentResultPage: React.FC = () => {
@@ -77,42 +77,54 @@ const AssessmentResultPage: React.FC = () => {
             <BehavioralProfileChart profileData={result} />
           </div>
           <div className="text-center md:text-left">
-            <h3 className="text-2xl font-bold text-gray-800">Perfil Principal</h3>
-            <p className="text-3xl font-extrabold text-indigo-600 mt-1">{analise_ia.perfil_principal}</p>
-            <p className="text-gray-700 mt-4 leading-relaxed">{analise_ia.resumo}</p>
+            {analise_ia ? (
+                <>
+                    <h3 className="text-2xl font-bold text-gray-800">Perfil Principal</h3>
+                    <p className="text-3xl font-extrabold text-indigo-600 mt-1">{analise_ia.perfil_principal}</p>
+                    <p className="text-gray-700 mt-4 leading-relaxed">{analise_ia.resumo}</p>
+                </>
+            ) : (
+                <div className="flex flex-col items-center justify-center h-full">
+                    <Loader2 className="h-8 w-8 text-gray-400 animate-spin" />
+                    <p className="mt-2 text-gray-500">A análise da IA está sendo gerada...</p>
+                    <p className="text-xs text-gray-400">Atualize a página em instantes.</p>
+                </div>
+            )}
           </div>
         </div>
 
-        <div className="mt-12 grid grid-cols-1 md:grid-cols-2 gap-8">
-          <div>
-            <h4 className="flex items-center text-xl font-semibold text-gray-800 mb-4">
-              <Zap className="h-6 w-6 text-green-500 mr-2" />
-              Pontos Fortes
-            </h4>
-            <ul className="space-y-3">
-              {analise_ia.pontos_fortes.map((point, index) => (
-                <li key={index} className="flex items-start">
-                  <Star className="h-5 w-5 text-yellow-400 mr-3 mt-1 flex-shrink-0" />
-                  <span className="text-gray-600">{point}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
-          <div>
-            <h4 className="flex items-center text-xl font-semibold text-gray-800 mb-4">
-              <ShieldAlert className="h-6 w-6 text-orange-500 mr-2" />
-              Pontos a Desenvolver
-            </h4>
-            <ul className="space-y-3">
-              {analise_ia.pontos_a_desenvolver.map((point, index) => (
-                <li key={index} className="flex items-start">
-                  <BrainCircuit className="h-5 w-5 text-blue-400 mr-3 mt-1 flex-shrink-0" />
-                  <span className="text-gray-600">{point}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
-        </div>
+        {analise_ia && (
+            <div className="mt-12 grid grid-cols-1 md:grid-cols-2 gap-8">
+            <div>
+                <h4 className="flex items-center text-xl font-semibold text-gray-800 mb-4">
+                <Zap className="h-6 w-6 text-green-500 mr-2" />
+                Pontos Fortes
+                </h4>
+                <ul className="space-y-3">
+                {analise_ia.pontos_fortes.map((point, index) => (
+                    <li key={index} className="flex items-start">
+                    <Star className="h-5 w-5 text-yellow-400 mr-3 mt-1 flex-shrink-0" />
+                    <span className="text-gray-600">{point}</span>
+                    </li>
+                ))}
+                </ul>
+            </div>
+            <div>
+                <h4 className="flex items-center text-xl font-semibold text-gray-800 mb-4">
+                <ShieldAlert className="h-6 w-6 text-orange-500 mr-2" />
+                Pontos a Desenvolver
+                </h4>
+                <ul className="space-y-3">
+                {analise_ia.pontos_a_desenvolver.map((point, index) => (
+                    <li key={index} className="flex items-start">
+                    <BrainCircuit className="h-5 w-5 text-blue-400 mr-3 mt-1 flex-shrink-0" />
+                    <span className="text-gray-600">{point}</span>
+                    </li>
+                ))}
+                </ul>
+            </div>
+            </div>
+        )}
          <div className="mt-12 text-center">
             <p className="text-gray-500">Você já pode fechar esta página. O recrutador foi notificado.</p>
         </div>
