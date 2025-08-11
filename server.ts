@@ -46,16 +46,16 @@ const SALT_ROUNDS = 10;
 interface BaserowJobPosting {
   id: number;
   titulo: string;
-  usuario?: { id: number; value: string }[]; 
+  usuario?: { id: number; value: string }[];
 }
 
 interface BaserowCandidate {
   id: number;
   vaga?: { id: number; value: string }[] | string | null;
   usuario?: { id: number; value: string }[] | null;
-  nome: string; 
-  telefone: string | null; 
-  curriculo?: { url: string; name: string }[] | null; 
+  nome: string;
+  telefone: string | null;
+  curriculo?: { url: string; name: string }[] | null;
   score?: number | null;
   resumo_ia?: string | null;
   status?: { id: number; value: 'Triagem' | 'Entrevista' | 'Aprovado' | 'Reprovado' } | null;
@@ -74,13 +74,13 @@ app.post('/api/auth/signup', async (req: Request, res: Response) => {
   try {
     const emailLowerCase = email.toLowerCase();
     const { results: existingUsers } = await baserowServer.get(USERS_TABLE_ID, `?filter__Email__equal=${emailLowerCase}`);
-    
+
     if (existingUsers && existingUsers.length > 0) {
       return res.status(409).json({ error: 'Este e-mail já está cadastrado.' });
     }
 
     const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS);
-    
+
     const newUser = await baserowServer.post(USERS_TABLE_ID, {
       nome,
       empresa,
@@ -146,7 +146,7 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
 app.patch('/api/users/:userId/profile', async (req: Request, res: Response) => {
   const { userId } = req.params;
   const { nome, empresa, avatar_url } = req.body;
-  
+
   if (!userId) {
     return res.status(400).json({ error: 'ID do usuário é obrigatório.' });
   }
@@ -162,7 +162,7 @@ app.patch('/api/users/:userId/profile', async (req: Request, res: Response) => {
     }
 
     const updatedUser = await baserowServer.patch(USERS_TABLE_ID, parseInt(userId), updatedData);
-    
+
     const userProfile = {
       id: updatedUser.id,
       nome: updatedUser.nome,
@@ -183,7 +183,7 @@ app.patch('/api/users/:userId/profile', async (req: Request, res: Response) => {
 app.patch('/api/users/:userId/password', async (req: Request, res: Response) => {
   const { userId } = req.params;
   const { password } = req.body;
-  
+
   if (!userId || !password) {
     return res.status(400).json({ error: 'ID do usuário e nova senha são obrigatórios.' });
   }
@@ -242,7 +242,7 @@ app.post('/api/upload-avatar', upload.single('avatar'), async (req: Request, res
     const newAvatarUrl = uploadedFile.url;
 
     const updatedUser = await baserowServer.patch(USERS_TABLE_ID, parseInt(userId), { avatar_url: newAvatarUrl });
-    
+
     const userProfile = {
       id: updatedUser.id,
       nome: updatedUser.nome,
@@ -316,7 +316,7 @@ app.delete('/api/jobs/:jobId', async (req: Request, res: Response) => {
 app.patch('/api/candidates/:candidateId/status', async (req: Request, res: Response) => {
   const { candidateId } = req.params;
   const { status } = req.body;
-  
+
   if (!candidateId || !status) {
     return res.status(400).json({ error: 'ID do candidato e status são obrigatórios.' });
   }
@@ -344,10 +344,10 @@ app.get('/api/data/all/:userId', async (req: Request, res: Response) => {
   try {
     const jobsResult = await baserowServer.get(VAGAS_TABLE_ID, '');
     const allJobs: BaserowJobPosting[] = (jobsResult.results || []) as BaserowJobPosting[];
-    const userJobs = allJobs.filter((job: BaserowJobPosting) => 
+    const userJobs = allJobs.filter((job: BaserowJobPosting) =>
       job.usuario && job.usuario.some((user: any) => user.id === parseInt(userId))
     );
-    
+
     const userJobIds = new Set(userJobs.map(job => job.id));
     const jobsMapByTitle = new Map<string, BaserowJobPosting>(userJobs.map((job: BaserowJobPosting) => [job.titulo.toLowerCase().trim(), job]));
     const jobsMapById = new Map<number, BaserowJobPosting>(userJobs.map((job: BaserowJobPosting) => [job.id, job]));
@@ -364,46 +364,39 @@ app.get('/api/data/all/:userId', async (req: Request, res: Response) => {
       if (candidate.usuario && candidate.usuario.some((u: any) => u.id === parseInt(userId))) {
         return true;
       }
-      
+
       if (candidate.vaga && typeof candidate.vaga === 'string') {
         const jobMatch = jobsMapByTitle.get(candidate.vaga.toLowerCase().trim());
         return !!jobMatch;
       }
-      
+
       if (candidate.vaga && Array.isArray(candidate.vaga) && candidate.vaga.length > 0) {
         const vagaId = (candidate.vaga[0] as { id: number; value: string }).id;
         return userJobIds.has(vagaId);
       }
-      
+
       return false;
     });
 
-    // CORREÇÃO FINAL: Normaliza o campo 'vaga' para ser sempre um objeto de relação.
     const syncedCandidates = userCandidatesRaw.map((candidate: BaserowCandidate) => {
       const newCandidate = { ...candidate };
       let vagaLink: { id: number; value: string }[] | null = null;
 
-      // Cenário A: Vaga é um texto (vem do WhatsApp)
       if (candidate.vaga && typeof candidate.vaga === 'string') {
-        const jobTitle = candidate.vaga.toLowerCase().trim();
-        const jobMatch = jobsMapByTitle.get(jobTitle);
+        const jobMatch = jobsMapByTitle.get(candidate.vaga.toLowerCase().trim());
         if (jobMatch) {
-          // Converte o texto para um objeto de relação que o frontend entende
           vagaLink = [{ id: jobMatch.id, value: jobMatch.titulo }];
         }
-      } 
-      // Cenário B: Vaga já é um objeto de relação (vem do cadastro normal)
-      else if (candidate.vaga && Array.isArray(candidate.vaga) && candidate.vaga.length > 0) {
+      } else if (candidate.vaga && Array.isArray(candidate.vaga) && candidate.vaga.length > 0) {
         const linkedVaga = candidate.vaga[0] as { id: number; value: string };
-        // Apenas confirma se a vaga pertence ao usuário antes de repassá-la
         if (jobsMapById.has(linkedVaga.id)) {
           vagaLink = [{ id: linkedVaga.id, value: linkedVaga.value }];
         }
       }
-      
+
       return { ...newCandidate, vaga: vagaLink };
     });
-    
+
     res.json({ jobs: userJobs, candidates: syncedCandidates });
 
   } catch (error: any) {
@@ -419,16 +412,16 @@ app.post('/api/upload-curriculums', upload.array('curriculumFiles'), async (req:
   if (!jobId || !userId || !files || files.length === 0) {
     return res.status(400).json({ error: 'Vaga, usuário e arquivos de currículo são obrigatórios.' });
   }
-  
+
   try {
     const newCandidateEntries = [];
     for (const file of files) {
-      if (file.size > 5 * 1024 * 1024) { 
-          return res.status(400).json({ success: false, message: `O arquivo '${file.originalname}' é muito grande. O limite é de 5MB.` });
+      if (file.size > 5 * 1024 * 1024) {
+        return res.status(400).json({ success: false, message: `O arquivo '${file.originalname}' é muito grande. O limite é de 5MB.` });
       }
 
       const uploadedFile = await baserowServer.uploadFileFromBuffer(file.buffer, file.originalname, file.mimetype);
-      
+
       const newCandidateData = {
         nome: file.originalname.split('.')[0] || 'Novo Candidato',
         curriculo: [{ name: uploadedFile.name, url: uploadedFile.url }],
@@ -436,7 +429,7 @@ app.post('/api/upload-curriculums', upload.array('curriculumFiles'), async (req:
         vaga: [parseInt(jobId as string)],
         score: null,
         resumo_ia: null,
-        status: 'Triagem', 
+        status: 'Triagem',
       };
 
       const createdCandidate = await baserowServer.post(CANDIDATOS_TABLE_ID, newCandidateData);
@@ -444,7 +437,7 @@ app.post('/api/upload-curriculums', upload.array('curriculumFiles'), async (req:
     }
 
     const N8N_TRIAGEM_WEBHOOK_URL = 'https://webhook.focoserv.com.br/webhook/recrutamento';
-    
+
     const jobInfo = await baserowServer.getRow(VAGAS_TABLE_ID, parseInt(jobId as string));
     const userInfo = await baserowServer.getRow(USERS_TABLE_ID, parseInt(userId as string));
 
@@ -455,11 +448,11 @@ app.post('/api/upload-curriculums', upload.array('curriculumFiles'), async (req:
         email: candidate.email,
         telefone: candidate.telefone,
         curriculo_url: candidate.curriculo?.[0]?.url,
-        status: candidate.status 
+        status: candidate.status
       }));
 
       const webhookPayload = {
-        tipo: 'triagem_curriculo_lote', 
+        tipo: 'triagem_curriculo_lote',
         recrutador: {
           id: userInfo.id,
           nome: userInfo.nome,
@@ -474,7 +467,7 @@ app.post('/api/upload-curriculums', upload.array('curriculumFiles'), async (req:
           requisitos_obrigatorios: jobInfo.requisitos_obrigatorios,
           requisitos_desejaveis: jobInfo.requisitos_desejaveis
         },
-        candidatos: candidatosParaWebhook 
+        candidatos: candidatosParaWebhook
       };
 
       try {
@@ -518,7 +511,7 @@ app.get('/api/google/auth/connect', (req: Request, res: Response) => {
   }
 
   const scopes = ['https://www.googleapis.com/auth/calendar.events'];
-  
+
   const url = oauth2Client.generateAuthUrl({
     access_type: 'offline',
     scope: scopes,
@@ -542,11 +535,11 @@ app.get('/api/google/auth/callback', async (req: Request, res: Response) => {
     const { refresh_token } = tokens;
 
     if (refresh_token) {
-      await baserowServer.patch(USERS_TABLE_ID, parseInt(userId as string), { 
-        google_refresh_token: refresh_token 
+      await baserowServer.patch(USERS_TABLE_ID, parseInt(userId as string), {
+        google_refresh_token: refresh_token
       });
     }
-    
+
     oauth2Client.setCredentials(tokens);
 
     res.send(closePopupScript);
@@ -558,9 +551,9 @@ app.get('/api/google/auth/callback', async (req: Request, res: Response) => {
 });
 
 app.post('/api/google/auth/disconnect', async (req: Request, res: Response) => {
-    const { userId } = req.body;
-    await baserowServer.patch(USERS_TABLE_ID, parseInt(userId), { google_refresh_token: null });
-    res.json({ success: true, message: 'Conta Google desconectada.' });
+  const { userId } = req.body;
+  await baserowServer.patch(USERS_TABLE_ID, parseInt(userId), { google_refresh_token: null });
+  res.json({ success: true, message: 'Conta Google desconectada.' });
 });
 
 app.get('/api/google/auth/status', async (req: Request, res: Response) => {
@@ -577,69 +570,69 @@ app.get('/api/google/auth/status', async (req: Request, res: Response) => {
 });
 
 app.post('/api/google/calendar/create-event', async (req: Request, res: Response) => {
-    const { userId, eventData, candidate, job } = req.body;
-    if (!userId || !eventData || !candidate || !job) {
-        return res.status(400).json({ success: false, message: 'Dados insuficientes.' });
+  const { userId, eventData, candidate, job } = req.body;
+  if (!userId || !eventData || !candidate || !job) {
+    return res.status(400).json({ success: false, message: 'Dados insuficientes.' });
+  }
+
+  try {
+    const userResponse = await baserowServer.getRow(USERS_TABLE_ID, parseInt(userId));
+    const refreshToken = userResponse.google_refresh_token;
+    if (!refreshToken) {
+      return res.status(401).json({ success: false, message: 'Usuário não conectado ao Google Calendar. Por favor, conecte sua conta em "Configurações".' });
     }
 
-    try {
-        const userResponse = await baserowServer.getRow(USERS_TABLE_ID, parseInt(userId));
-        const refreshToken = userResponse.google_refresh_token;
-        if (!refreshToken) {
-            return res.status(401).json({ success: false, message: 'Usuário não conectado ao Google Calendar. Por favor, conecte sua conta em "Configurações".' });
-        }
-        
-        oauth2Client.setCredentials({ refresh_token: refreshToken });
-        const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
-        const eventDescription = `Entrevista com o candidato: ${candidate.nome}.\n` +
-                                 `Telefone: ${candidate.telefone || 'Não informado'}\n\n` +
-                                 `--- Detalhes adicionais ---\n` +
-                                 `${eventData.details || 'Nenhum detalhe adicional.'}`;
-        const event = {
-            summary: eventData.title,
-            description: eventDescription,
-            start: { dateTime: eventData.start, timeZone: 'America/Sao_Paulo' },
-            end: { dateTime: eventData.end, timeZone: 'America/Sao_Paulo' },
-            reminders: { useDefault: true },
-        };
+    oauth2Client.setCredentials({ refresh_token: refreshToken });
+    const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
+    const eventDescription = `Entrevista com o candidato: ${candidate.nome}.\n` +
+      `Telefone: ${candidate.telefone || 'Não informado'}\n\n` +
+      `--- Detalhes adicionais ---\n` +
+      `${eventData.details || 'Nenhum detalhe adicional.'}`;
+    const event = {
+      summary: eventData.title,
+      description: eventDescription,
+      start: { dateTime: eventData.start, timeZone: 'America/Sao_Paulo' },
+      end: { dateTime: eventData.end, timeZone: 'America/Sao_Paulo' },
+      reminders: { useDefault: true },
+    };
 
-        const response = await calendar.events.insert({
-            calendarId: 'primary', requestBody: event,
-        });
-        
-        await baserowServer.post(AGENDAMENTOS_TABLE_ID, {
-          'Título': eventData.title,
-          'Início': eventData.start,
-          'Fim': eventData.end,
-          'Detalhes': eventData.details,
-          'Candidato': [candidate.id],
-          'Vaga': [job.id],
-          'google_event_link': response.data.htmlLink
-        });
+    const response = await calendar.events.insert({
+      calendarId: 'primary', requestBody: event,
+    });
 
-        if (process.env.N8N_SCHEDULE_WEBHOOK_URL) {
-            const webhookPayload = {
-                recruiter: userResponse, candidate: candidate, job: job,
-                interview: {
-                    title: eventData.title, startTime: eventData.start, endTime: eventData.end,
-                    details: eventData.details, googleEventLink: response.data.htmlLink
-                }
-            };
-            try {
-                await fetch(process.env.N8N_SCHEDULE_WEBHOOK_URL, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(webhookPayload)
-                });
-            } catch (webhookError) {
-                console.error("Erro ao disparar o webhook para o n8n:", webhookError);
-            }
+    await baserowServer.post(AGENDAMENTOS_TABLE_ID, {
+      'Título': eventData.title,
+      'Início': eventData.start,
+      'Fim': eventData.end,
+      'Detalhes': eventData.details,
+      'Candidato': [candidate.id],
+      'Vaga': [job.id],
+      'google_event_link': response.data.htmlLink
+    });
+
+    if (process.env.N8N_SCHEDULE_WEBHOOK_URL) {
+      const webhookPayload = {
+        recruiter: userResponse, candidate: candidate, job: job,
+        interview: {
+          title: eventData.title, startTime: eventData.start, endTime: eventData.end,
+          details: eventData.details, googleEventLink: response.data.htmlLink
         }
-        res.json({ success: true, message: 'Evento criado com sucesso!', data: response.data });
-    } catch (error) {
-        console.error('Erro ao criar evento no Google Calendar:', error);
-        res.status(500).json({ success: false, message: 'Falha ao criar evento.' });
+      };
+      try {
+        await fetch(process.env.N8N_SCHEDULE_WEBHOOK_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(webhookPayload)
+        });
+      } catch (webhookError) {
+        console.error("Erro ao disparar o webhook para o n8n:", webhookError);
+      }
     }
+    res.json({ success: true, message: 'Evento criado com sucesso!', data: response.data });
+  } catch (error) {
+    console.error('Erro ao criar evento no Google Calendar:', error);
+    res.status(500).json({ success: false, message: 'Falha ao criar evento.' });
+  }
 });
 
 app.listen(port, () => {
