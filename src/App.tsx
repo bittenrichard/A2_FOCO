@@ -34,33 +34,18 @@ const LoadingSpinner: React.FC = () => (
   </div>
 );
 
-// Este componente gerencia as rotas para usuários autenticados
 const AppRoutes: React.FC = () => {
     const { profile, isAuthenticated, isLoading: isAuthLoading, error: authError, signIn, signOut, signUp } = useAuth();
     const { jobs, candidates, isDataLoading, fetchAllData } = useDataStore();
     const [currentPage, setCurrentPage] = useState<PageKey>('dashboard');
     const [selectedJob, setSelectedJob] = useState<JobPosting | null>(null);
+    const navigate = useNavigate(); // Hook para navegação
 
     useEffect(() => {
         if (isAuthenticated && profile) {
             fetchAllData(profile);
         }
     }, [isAuthenticated, profile, fetchAllData]);
-
-    const handleLogin = async (credentials: LoginCredentials) => {
-        return await signIn(credentials);
-    };
-
-    const handleSignUp = async (credentials: SignUpCredentials) => {
-        const newUser = await signUp(credentials);
-        if (newUser) {
-            await handleLogin({ email: credentials.email, password: credentials.password });
-        }
-    };
-
-    const handleLogout = () => {
-        signOut();
-    };
 
     const handleViewResults = (job: JobPosting) => {
         setSelectedJob(job);
@@ -89,12 +74,16 @@ const AppRoutes: React.FC = () => {
             alert("Não foi possível excluir a vaga.");
         }
     };
+    
+    const handleLogout = () => {
+        signOut();
+        navigate('/login'); // Redireciona para o login após o logout
+    };
 
     if (isAuthLoading || (isAuthenticated && isDataLoading)) {
         return <LoadingSpinner />;
     }
     
-    // Se o usuário não estiver autenticado, o roteador principal irá redirecioná-lo
     if (!isAuthenticated) {
         return <Navigate to="/login" replace />;
     }
@@ -121,28 +110,60 @@ const AppRoutes: React.FC = () => {
     );
 };
 
-// Componente principal que define a estrutura de roteamento
+
+function AuthRoutes() {
+    const { signIn, signUp, isLoading, error } = useAuth();
+    const navigate = useNavigate();
+
+    const handleLogin = async (credentials: LoginCredentials) => {
+        const success = await signIn(credentials);
+        if (success) {
+            navigate('/'); // Redireciona para o dashboard após login
+        }
+    };
+
+    const handleSignUp = async (credentials: SignUpCredentials) => {
+        const newUser = await signUp(credentials);
+        if (newUser) {
+            await handleLogin({ email: credentials.email, password: credentials.password });
+        }
+    };
+
+    return (
+        <Routes>
+            <Route path="/login" element={<LoginPage onLogin={handleLogin} onNavigateSignUp={() => navigate('/signup')} isLoading={isLoading} error={error} />} />
+            <Route path="/signup" element={<SignUpPage onSignUp={handleSignUp} onNavigateLogin={() => navigate('/login')} isLoading={isLoading} error={error} />} />
+            <Route path="*" element={<Navigate to="/login" />} />
+        </Routes>
+    );
+}
+
+
 function App() {
     return (
         <div className="font-inter antialiased">
             <AuthProvider>
                 <Router>
                     <Routes>
-                        {/* Rotas Públicas */}
                         <Route path="/assessment/:token" element={<AssessmentPage />} />
                         <Route path="/assessment/result/:assessmentId" element={<AssessmentResultPage />} />
-                        
-                        {/* Rotas de Autenticação */}
-                        <Route path="/login" element={<LoginPage onLogin={async (creds) => {}} onNavigateSignUp={() => {}} isLoading={false} error={null} />} />
-                        <Route path="/signup" element={<SignUpPage onSignUp={async (creds) => {}} onNavigateLogin={() => {}} isLoading={false} error={null} />} />
-                        
-                        {/* Rotas Privadas (aplicação principal) */}
-                        <Route path="/*" element={<AppRoutes />} />
+                        <Route path="/*" element={<AppContent />} />
                     </Routes>
                 </Router>
             </AuthProvider>
         </div>
     );
+}
+
+// Novo componente para separar o contexto de autenticação
+function AppContent() {
+    const { isAuthenticated, isLoading } = useAuth();
+
+    if (isLoading) {
+        return <LoadingSpinner />;
+    }
+
+    return isAuthenticated ? <AppRoutes /> : <AuthRoutes />;
 }
 
 export default App;
