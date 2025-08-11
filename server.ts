@@ -342,17 +342,16 @@ app.get('/api/data/all/:userId', async (req: Request, res: Response) => {
   }
 
   try {
-    // Passo 1: Buscar todas as vagas e filtrar apenas as do usuário logado.
     const jobsResult = await baserowServer.get(VAGAS_TABLE_ID, '');
     const allJobs: BaserowJobPosting[] = (jobsResult.results || []) as BaserowJobPosting[];
     const userJobs = allJobs.filter((job: BaserowJobPosting) => 
       job.usuario && job.usuario.some((user: any) => user.id === parseInt(userId))
     );
-    // Criar um conjunto de IDs de vagas do usuário para busca rápida.
+    
     const userJobIds = new Set(userJobs.map(job => job.id));
     const jobsMapByTitle = new Map<string, BaserowJobPosting>(userJobs.map((job: BaserowJobPosting) => [job.titulo.toLowerCase().trim(), job]));
+    const jobsMapById = new Map<number, BaserowJobPosting>(userJobs.map((job: BaserowJobPosting) => [job.id, job]));
 
-    // Passo 2: Buscar TODOS os candidatos de AMBAS as tabelas.
     const regularCandidatesResult = await baserowServer.get(CANDIDATOS_TABLE_ID, '');
     const whatsappCandidatesResult = await baserowServer.get(WHATSAPP_CANDIDATOS_TABLE_ID, '');
 
@@ -361,34 +360,24 @@ app.get('/api/data/all/:userId', async (req: Request, res: Response) => {
       ...(whatsappCandidatesResult.results || [])
     ] as BaserowCandidate[];
 
-    // Passo 3: Lógica Aprimorada para filtrar candidatos.
-    // Um candidato pertence ao usuário se estiver ligado diretamente ao usuário OU a uma de suas vagas.
     const userCandidatesRaw = allCandidatesRaw.filter((candidate: BaserowCandidate) => {
-      // Verificação 1: Link direto com o usuário (garante compatibilidade)
       if (candidate.usuario && candidate.usuario.some((u: any) => u.id === parseInt(userId))) {
         return true;
       }
       
-      // Verificação 2: Link indireto via Vaga.
-      // Cenário A: Vaga é uma string (tabela de WhatsApp)
       if (candidate.vaga && typeof candidate.vaga === 'string') {
         const jobMatch = jobsMapByTitle.get(candidate.vaga.toLowerCase().trim());
-        // Se a vaga (pelo título) existe no mapa de vagas do usuário, o candidato é dele.
         return !!jobMatch;
       }
       
-      // Cenário B: Vaga é um array de objetos (tabela de candidatos normal)
       if (candidate.vaga && Array.isArray(candidate.vaga) && candidate.vaga.length > 0) {
         const vagaId = (candidate.vaga[0] as { id: number; value: string }).id;
-        // Se o ID da vaga do candidato está no conjunto de IDs de vagas do usuário, ele é dele.
         return userJobIds.has(vagaId);
       }
       
-      // Se nenhuma condição for atendida, o candidato não pertence a este usuário.
       return false;
     });
 
-    // Passo 4: Sincronizar o campo 'vaga' para garantir que seja sempre um objeto.
     const syncedCandidates = userCandidatesRaw.map((candidate: BaserowCandidate) => {
       const newCandidate = { ...candidate };
       let vagaLink: { id: number; value: string }[] | null = null;
@@ -400,7 +389,10 @@ app.get('/api/data/all/:userId', async (req: Request, res: Response) => {
         }
       } else if (candidate.vaga && Array.isArray(candidate.vaga) && candidate.vaga.length > 0) {
         const linkedVaga = candidate.vaga[0] as { id: number; value: string };
-        vagaLink = [{ id: linkedVaga.id, value: linkedVaga.value }];
+        const jobMatch = jobsMapById.get(linkedVaga.id);
+        if (jobMatch) {
+          vagaLink = [{ id: jobMatch.id, value: jobMatch.titulo }];
+        }
       }
       return { ...newCandidate, vaga: vagaLink };
     });
@@ -646,3 +638,4 @@ app.post('/api/google/calendar/create-event', async (req: Request, res: Response
 app.listen(port, () => {
   console.log(`Backend rodando em http://localhost:${port}`);
 });
+}
