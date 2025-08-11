@@ -32,6 +32,11 @@ const AssessmentPage: React.FC = () => {
     fetchAssessmentData();
   }, [token]);
 
+  // CORREÇÃO DE UX: Rola para o topo a cada mudança de passo
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [step]);
+
   const handleSelect = (adjective: string) => {
     const currentStep = step + 1;
     const currentSelection = selections[currentStep] || [];
@@ -46,6 +51,7 @@ const AssessmentPage: React.FC = () => {
   const prevStep = () => setStep(prev => prev - 1);
 
   const handleSubmit = async () => {
+    if (!assessmentId) return;
     setIsLoading(true);
     try {
         const response = await fetch(`${API_BASE_URL}/api/assessment/${assessmentId}/submit`, {
@@ -59,7 +65,10 @@ const AssessmentPage: React.FC = () => {
         });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error);
-        setStep(3); // Vai para a tela de agradecimento
+        
+        // Manda para a página de resultado ao finalizar
+        navigate(`/assessment/result/${assessmentId}`);
+
     } catch (err: any) {
         setError(err.message);
     } finally {
@@ -75,18 +84,6 @@ const AssessmentPage: React.FC = () => {
     { title: "Passo 2 de 3", instruction: "Marque os adjetivos que melhor te representam (motivação)." },
     { title: "Passo 3 de 3", instruction: "Agora, na sua percepção, marque como os outros pensam que você deveria ser (atributos que você tenha ou não)." }
   ];
-  
-  if(step === 3) {
-      return (
-          <div className="min-h-screen bg-gray-100 flex items-center justify-center p-4">
-              <div className="bg-white p-8 rounded-lg shadow-lg text-center max-w-lg">
-                  <h1 className="text-3xl font-bold text-indigo-600 mb-4">Obrigado!</h1>
-                  <p className="text-gray-700">Sua avaliação foi concluída e enviada com sucesso para o recrutador.</p>
-                  <p className="text-gray-500 mt-2">Você já pode fechar esta janela.</p>
-              </div>
-          </div>
-      )
-  }
 
   return (
     <div className="min-h-screen bg-gray-100 p-4 sm:p-8">
@@ -126,7 +123,7 @@ const AssessmentPage: React.FC = () => {
             </button>
           ) : (
             <button onClick={handleSubmit} disabled={isLoading} className="px-6 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-50">
-              {isLoading ? 'Finalizando...' : 'Finalizar'}
+              {isLoading ? 'Finalizando...' : 'Finalizar e Ver Resultado'}
             </button>
           )}
         </div>
