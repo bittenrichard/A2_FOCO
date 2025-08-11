@@ -342,10 +342,17 @@ app.get('/api/data/all/:userId', async (req: Request, res: Response) => {
   }
 
   try {
+    // Passo 1: Buscar todas as vagas e filtrar apenas as do usuário logado.
     const jobsResult = await baserowServer.get(VAGAS_TABLE_ID, '');
     const allJobs: BaserowJobPosting[] = (jobsResult.results || []) as BaserowJobPosting[];
-    const userJobs = allJobs.filter((j: BaserowJobPosting) => j.usuario && j.usuario.some((u: any) => u.id === parseInt(userId)));
+    const userJobs = allJobs.filter((job: BaserowJobPosting) => 
+      job.usuario && job.usuario.some((user: any) => user.id === parseInt(userId))
+    );
+    // Criar um conjunto de IDs de vagas do usuário para busca rápida.
+    const userJobIds = new Set(userJobs.map(job => job.id));
+    const jobsMapByTitle = new Map<string, BaserowJobPosting>(userJobs.map((job: BaserowJobPosting) => [job.titulo.toLowerCase().trim(), job]));
 
+    // Passo 2: Buscar TODOS os candidatos de AMBAS as tabelas.
     const regularCandidatesResult = await baserowServer.get(CANDIDATOS_TABLE_ID, '');
     const whatsappCandidatesResult = await baserowServer.get(WHATSAPP_CANDIDATOS_TABLE_ID, '');
 
@@ -354,11 +361,34 @@ app.get('/api/data/all/:userId', async (req: Request, res: Response) => {
       ...(whatsappCandidatesResult.results || [])
     ] as BaserowCandidate[];
 
-    const userCandidatesRaw = allCandidatesRaw.filter((c: BaserowCandidate) => c.usuario && c.usuario.some((u: any) => u.id === parseInt(userId)));
+    // Passo 3: Lógica Aprimorada para filtrar candidatos.
+    // Um candidato pertence ao usuário se estiver ligado diretamente ao usuário OU a uma de suas vagas.
+    const userCandidatesRaw = allCandidatesRaw.filter((candidate: BaserowCandidate) => {
+      // Verificação 1: Link direto com o usuário (garante compatibilidade)
+      if (candidate.usuario && candidate.usuario.some((u: any) => u.id === parseInt(userId))) {
+        return true;
+      }
+      
+      // Verificação 2: Link indireto via Vaga.
+      // Cenário A: Vaga é uma string (tabela de WhatsApp)
+      if (candidate.vaga && typeof candidate.vaga === 'string') {
+        const jobMatch = jobsMapByTitle.get(candidate.vaga.toLowerCase().trim());
+        // Se a vaga (pelo título) existe no mapa de vagas do usuário, o candidato é dele.
+        return !!jobMatch;
+      }
+      
+      // Cenário B: Vaga é um array de objetos (tabela de candidatos normal)
+      if (candidate.vaga && Array.isArray(candidate.vaga) && candidate.vaga.length > 0) {
+        const vagaId = (candidate.vaga[0] as { id: number; value: string }).id;
+        // Se o ID da vaga do candidato está no conjunto de IDs de vagas do usuário, ele é dele.
+        return userJobIds.has(vagaId);
+      }
+      
+      // Se nenhuma condição for atendida, o candidato não pertence a este usuário.
+      return false;
+    });
 
-    const jobsMapById = new Map<number, BaserowJobPosting>(userJobs.map((job: BaserowJobPosting) => [job.id, job]));
-    const jobsMapByTitle = new Map<string, BaserowJobPosting>(userJobs.map((job: BaserowJobPosting) => [job.titulo.toLowerCase().trim(), job]));
-
+    // Passo 4: Sincronizar o campo 'vaga' para garantir que seja sempre um objeto.
     const syncedCandidates = userCandidatesRaw.map((candidate: BaserowCandidate) => {
       const newCandidate = { ...candidate };
       let vagaLink: { id: number; value: string }[] | null = null;
@@ -370,10 +400,7 @@ app.get('/api/data/all/:userId', async (req: Request, res: Response) => {
         }
       } else if (candidate.vaga && Array.isArray(candidate.vaga) && candidate.vaga.length > 0) {
         const linkedVaga = candidate.vaga[0] as { id: number; value: string };
-        const jobMatch = jobsMapById.get(linkedVaga.id);
-        if (jobMatch) {
-          vagaLink = [{ id: jobMatch.id, value: jobMatch.titulo }];
-        }
+        vagaLink = [{ id: linkedVaga.id, value: linkedVaga.value }];
       }
       return { ...newCandidate, vaga: vagaLink };
     });
@@ -423,8 +450,6 @@ app.post('/api/upload-curriculums', upload.array('curriculumFiles'), async (req:
     const userInfo = await baserowServer.getRow(USERS_TABLE_ID, parseInt(userId as string));
 
     if (N8N_TRIAGEM_WEBHOOK_URL && newCandidateEntries.length > 0 && jobInfo && userInfo) {
-      console.log('Disparando webhook em lote para o n8n (triagem de currículos)...');
-      
       const candidatosParaWebhook = newCandidateEntries.map(candidate => ({
         id: candidate.id,
         nome: candidate.nome,
@@ -454,18 +479,11 @@ app.post('/api/upload-curriculums', upload.array('curriculumFiles'), async (req:
       };
 
       try {
-        const n8nResponse = await fetch(N8N_TRIAGEM_WEBHOOK_URL, {
+        await fetch(N8N_TRIAGEM_WEBHOOK_URL, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(webhookPayload)
         });
-
-        if (!n8nResponse.ok) {
-          const n8nErrorData = await n8nResponse.text(); 
-          console.error(`Webhook para n8n (triagem em lote) falhou! Status: ${n8nResponse.status}, Resposta: ${n8nErrorData}`);
-        } else {
-          console.log(`Webhook para n8n (triagem em lote) disparado com sucesso. Resposta do n8n:`, await n8nResponse.json());
-        }
       } catch (webhookError) {
         console.error("Erro ao disparar o webhook para o n8n (triagem em lote):", webhookError);
       }
@@ -494,8 +512,6 @@ app.get('/api/schedules/:userId', async (req: Request, res: Response) => {
   }
 });
 
-// --- ENDPOINTS DE INTEGRAÇÃO GOOGLE CALENDAR ---
-
 app.get('/api/google/auth/connect', (req: Request, res: Response) => {
   const { userId } = req.query;
   if (!userId) {
@@ -504,16 +520,13 @@ app.get('/api/google/auth/connect', (req: Request, res: Response) => {
 
   const scopes = ['https://www.googleapis.com/auth/calendar.events'];
   
-  // CORREÇÃO AQUI: Garantindo 'prompt: consent' para sempre pedir autorização
-  // e 'access_type: offline' para solicitar o refresh_token.
   const url = oauth2Client.generateAuthUrl({
     access_type: 'offline',
     scope: scopes,
-    prompt: 'consent', // Força a tela de consentimento do Google
+    prompt: 'consent',
     state: userId.toString(),
   });
 
-  console.log(`[Google Auth] Gerando URL de autorização para userId: ${userId}`);
   res.json({ url });
 });
 
@@ -522,54 +535,32 @@ app.get('/api/google/auth/callback', async (req: Request, res: Response) => {
   const closePopupScript = `<script>window.close();</script>`;
 
   if (!code || !userId) {
-    console.error("[Google Auth Callback] Erro: Código de autorização ou 'state' (userId) ausente na requisição.");
     return res.send(closePopupScript);
   }
-
-  console.log(`[Google Auth Callback] Recebido código para userId: ${userId}. Trocando por token...`);
 
   try {
     const { tokens } = await oauth2Client.getToken(code as string);
     const { refresh_token } = tokens;
 
-    // Log detalhado para depuração
-    console.log('[Google Auth Callback] Resposta de tokens recebida do Google:', tokens);
-
     if (refresh_token) {
-      console.log(`[Google Auth Callback] SUCESSO! Refresh Token obtido para userId: ${userId}. Salvando no banco de dados...`);
-      
       await baserowServer.patch(USERS_TABLE_ID, parseInt(userId as string), { 
         google_refresh_token: refresh_token 
       });
-
-      console.log(`[Google Auth Callback] Refresh Token para userId: ${userId} salvo com sucesso no Baserow.`);
-
-    } else {
-      console.warn(`[Google Auth Callback] AVISO: Nenhum refresh_token foi recebido do Google para o userId: ${userId}. Isso pode acontecer se o usuário já autorizou o app anteriormente e não revogou o acesso. O token de acesso ainda pode funcionar para esta sessão.`);
     }
     
-    // Atualiza as credenciais do oauth2Client para a sessão atual
     oauth2Client.setCredentials(tokens);
 
     res.send(closePopupScript);
 
   } catch (error: any) {
     console.error('[Google Auth Callback] ERRO DETALHADO na troca de código por token:', error.response?.data || error.message);
-    res.status(500).send(`
-      <html><body>
-        <h1>Erro na Autenticação</h1>
-        <p>Houve um erro ao tentar conectar com o Google. Por favor, tente novamente.</p>
-        <p>Detalhes do erro: ${error.message}</p>
-        <button onclick="window.close()">Fechar</button>
-      </body></html>
-    `);
+    res.status(500).send(`<html><body><h1>Erro na Autenticação</h1></body></html>`);
   }
 });
 
 app.post('/api/google/auth/disconnect', async (req: Request, res: Response) => {
     const { userId } = req.body;
     await baserowServer.patch(USERS_TABLE_ID, parseInt(userId), { google_refresh_token: null });
-    console.log(`[Google Auth] Desconectando calendário para o usuário ${userId}`);
     res.json({ success: true, message: 'Conta Google desconectada.' });
 });
 
@@ -636,7 +627,7 @@ app.post('/api/google/calendar/create-event', async (req: Request, res: Response
                 }
             };
             try {
-                fetch(process.env.N8N_SCHEDULE_WEBHOOK_URL, {
+                await fetch(process.env.N8N_SCHEDULE_WEBHOOK_URL, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(webhookPayload)
