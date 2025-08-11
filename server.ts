@@ -563,7 +563,7 @@ app.get('/api/google/auth/status', async (req: Request, res: Response) => {
     const userResponse = await baserowServer.getRow(USERS_TABLE_ID, parseInt(userId as string));
     const isConnected = !!userResponse.google_refresh_token;
     res.json({ isConnected });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Erro ao verificar status da conexão Google para o usuário:', userId, error);
     res.status(500).json({ error: 'Erro ao verificar status da conexão.' });
   }
@@ -629,7 +629,7 @@ app.post('/api/google/calendar/create-event', async (req: Request, res: Response
       }
     }
     res.json({ success: true, message: 'Evento criado com sucesso!', data: response.data });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Erro ao criar evento no Google Calendar:', error);
     res.status(500).json({ success: false, message: 'Falha ao criar evento.' });
   }
