@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from './features/auth/hooks/useAuth';
+import { AuthProvider } from './features/auth/context/AuthContext'; // <-- CORREÇÃO: IMPORTAÇÃO ADICIONADA
 import LoginPage from './features/auth/components/LoginPage';
 import SignUpPage from './features/auth/components/SignUpPage';
 import MainLayout from './shared/components/Layout/MainLayout';
@@ -16,7 +17,7 @@ import { JobPosting } from './features/screening/types';
 import { Loader2 } from 'lucide-react';
 import CandidateDatabasePage from './features/database/components/CandidateDatabasePage';
 import AgendaPage from './features/agenda/components/AgendaPage';
-import AssessmentPage from './features/assessment/AssessmentPage'; // <-- IMPORTAR NOVA PÁGINA
+import AssessmentPage from './features/assessment/AssessmentPage';
 import { useDataStore } from './shared/store/useDataStore';
 import { DndProvider } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
@@ -93,16 +94,21 @@ const AppRoutes: React.FC = () => {
         );
     }
     
+    // Simulação de navegação interna sem recarregar a página
     const renderContent = () => {
+        const path = window.location.pathname;
+        if (path === '/new-screening') setCurrentPage('new-screening');
+        // Adicionar outras lógicas de rota se necessário
+        
         switch (currentPage) {
             case 'dashboard': return <DashboardPage jobs={jobs} candidates={candidates} onViewResults={handleViewResults} onDeleteJob={handleDeleteJob} onNavigate={setCurrentPage} onEditJob={handleEditJob} />;
             case 'new-screening': return <NewScreeningPage onJobCreated={handleJobCreated} onCancel={() => setCurrentPage('dashboard')} />;
-            case 'edit-screening': return selectedJob ? <EditScreeningPage jobToEdit={selectedJob} onJobUpdated={handleJobUpdated} onCancel={() => setCurrentPage('dashboard')} /> : <Navigate to="/dashboard" />;
+            case 'edit-screening': return selectedJob ? <EditScreeningPage jobToEdit={selectedJob} onJobUpdated={handleJobUpdated} onCancel={() => setCurrentPage('dashboard')} /> : <DashboardPage jobs={jobs} candidates={candidates} onViewResults={handleViewResults} onDeleteJob={handleDeleteJob} onNavigate={setCurrentPage} onEditJob={handleEditJob} />;
             case 'results': return <ResultsPage selectedJob={selectedJob} candidates={candidates} onDataSynced={() => fetchAllData(profile!)} />;
             case 'database': return <CandidateDatabasePage />;
             case 'agenda': return <AgendaPage />;
             case 'settings': return <SettingsPage />;
-            default: return <Navigate to="/dashboard" />;
+            default: return <DashboardPage jobs={jobs} candidates={candidates} onViewResults={handleViewResults} onDeleteJob={handleDeleteJob} onNavigate={setCurrentPage} onEditJob={handleEditJob} />;
         }
     };
 
