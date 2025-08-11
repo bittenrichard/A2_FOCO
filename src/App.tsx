@@ -1,7 +1,7 @@
 // Local: src/App.tsx
 
 import React, { useEffect, useState } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate } from 'react-router-dom'; // <-- CORREÇÃO AQUI
 import { useAuth } from './features/auth/hooks/useAuth';
 import { AuthProvider } from './features/auth/context/AuthContext';
 import LoginPage from './features/auth/components/LoginPage';
@@ -35,11 +35,11 @@ const LoadingSpinner: React.FC = () => (
 );
 
 const AppRoutes: React.FC = () => {
-    const { profile, isAuthenticated, isLoading: isAuthLoading, error: authError, signIn, signOut, signUp } = useAuth();
+    const { profile, isAuthenticated, isLoading: isAuthLoading, signOut } = useAuth();
     const { jobs, candidates, isDataLoading, fetchAllData } = useDataStore();
     const [currentPage, setCurrentPage] = useState<PageKey>('dashboard');
     const [selectedJob, setSelectedJob] = useState<JobPosting | null>(null);
-    const navigate = useNavigate(); // Hook para navegação
+    const navigate = useNavigate();
 
     useEffect(() => {
         if (isAuthenticated && profile) {
@@ -77,7 +77,7 @@ const AppRoutes: React.FC = () => {
     
     const handleLogout = () => {
         signOut();
-        navigate('/login'); // Redireciona para o login após o logout
+        navigate('/login');
     };
 
     if (isAuthLoading || (isAuthenticated && isDataLoading)) {
@@ -118,7 +118,7 @@ function AuthRoutes() {
     const handleLogin = async (credentials: LoginCredentials) => {
         const success = await signIn(credentials);
         if (success) {
-            navigate('/'); // Redireciona para o dashboard após login
+            navigate('/');
         }
     };
 
@@ -155,7 +155,6 @@ function App() {
     );
 }
 
-// Novo componente para separar o contexto de autenticação
 function AppContent() {
     const { isAuthenticated, isLoading } = useAuth();
 
