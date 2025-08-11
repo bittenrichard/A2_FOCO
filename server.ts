@@ -30,6 +30,7 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
+
 if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET || !process.env.GOOGLE_REDIRECT_URI) {
   console.error("ERRO CRÍTICO: As credenciais do Google não foram encontradas...");
   process.exit(1);
@@ -608,7 +609,50 @@ app.post('/api/assessment/:assessmentId/submit', async (req: Request, res: Respo
         
         (async () => {
             try {
-                const prompt = `Baseado na metodologia DISC, analise o seguinte perfil comportamental de um candidato:\nScores Percentuais:\n- Executor (Dominância): ${finalScores.executor}%\n- Comunicador (Influência): ${finalScores.comunicador}%\n- Planejador (Estabilidade): ${finalScores.planejador}%\n- Analista (Conformidade): ${finalScores.analista}%\n\nAdjetivos selecionados pelo candidato que descrevem sua personalidade: ${passo1.join(', ')}.\nAdjetivos que representam sua motivação: ${passo2.join(', ')}.\nAdjetivos sobre como ele acha que os outros o veem: ${passo3.join(', ')}.\n\nPor favor, retorne uma análise em formato JSON com a seguinte estrutura:\n{\n  "perfil_principal": "Nome do perfil dominante (ou 'Equilibrado' se não houver um claro dominante)",\n  "resumo": "Um parágrafo curto resumindo o comportamento geral do candidato.",\n  "pontos_fortes": ["Um", "array", "com", "3 a 5", "pontos fortes chave"],\n  "pontos_a_desenvolver": ["Um", "array", "com", "3 a 5", "pontos de atenção ou a desenvolver"]\n}`;
+                const prompt = `
+# PERSONA
+Você é um Analista Comportamental Sênior, especialista certificado na metodologia DISC. Sua comunicação é clara, objetiva e sempre construtiva. Sua análise vai além dos rótulos, focando em como os traços se manifestam no ambiente de trabalho.
+# OBJETIVO
+Analisar os dados de um perfil DISC para gerar um resumo coeso e prático, identificando o perfil predominante, os pontos fortes e os pontos de atenção, considerando o contexto de uma vaga ou do desenvolvimento profissional.
+# DADOS DE ENTRADA
+- **Contexto da Análise:** "Análise de perfil para desenvolvimento profissional e adequação geral a um ambiente de trabalho corporativo."
+- **Scores Percentuais:**
+    - Executor (Dominância): ${finalScores.executor}%
+    - Comunicador (Influência): ${finalScores.comunicador}%
+    - Planejador (Estabilidade): ${finalScores.planejador}%
+    - Analista (Conformidade): ${finalScores.analista}%
+- **Adjetivos Selecionados:** ${JSON.stringify(allSelected)}
+# PROCESSO DE ANÁLISE (Passo a Passo)
+1.  **Identificar Perfil Principal e Secundário:**
+    * O \`perfil_principal\` é o fator com a maior pontuação.
+    * Identifique também o segundo fator com maior pontuação, pois ele modula e enriquece a análise do perfil principal.
+2.  **Elaborar o Resumo:**
+    * Inicie o \`resumo_comportamental\` descrevendo o perfil principal.
+    * Explique como o perfil secundário influencia o principal. (Ex: "Um perfil Executor com um forte componente Analista tende a tomar decisões baseadas em dados, sendo menos impulsivo que um Executor puro.")
+    * Incorpore os \`Adjetivos Selecionados\` no resumo para personalizar a análise e torná-la menos genérica. (Ex: "Sua natureza de Planejador se manifesta através de uma abordagem 'cuidadosa' e 'persistente'...")
+3.  **Avaliar Pontos Fortes:**
+    * Baseado no **Contexto da Análise**, liste comportamentos e traços do perfil que são altamente benéficos.
+4.  **Avaliar Pontos a Desenvolver:**
+    * Baseado no **Contexto da Análise**, identifique traços que podem ser desafios.
+    * **IMPORTANTE:** Use uma linguagem construtiva. Troque "pontos fracos" por "pontos de atenção" ou "desafios a gerenciar".
+# ESTRUTURA DE SAÍDA (JSON)
+Sua resposta final deve ser **APENAS** o objeto JSON abaixo, sem textos ou explicações adicionais fora dele.
+\`\`\`json
+{
+  "perfil_principal": "O nome do perfil com a maior pontuação (Executor, Comunicador, Planejador ou Analista)",
+  "perfil_secundario": "O nome do perfil com a segunda maior pontuação",
+  "resumo_comportamental": "Um parágrafo detalhado que descreve o estilo de trabalho do candidato, combinando o perfil principal, o secundário e os adjetivos selecionados.",
+  "pontos_fortes_contextuais": [
+    "Ponto forte 1, explicado de forma clara e relacionado ao contexto.",
+    "Ponto forte 2, explicado de forma clara e relacionado ao contexto."
+  ],
+  "pontos_de_atencao": [
+    "Ponto a desenvolver 1, descrito de forma construtiva.",
+    "Ponto a desenvolver 2, descrito de forma construtiva."
+  ]
+}
+\`\`\`
+`;
                 const completion = await openai.chat.completions.create({ model: 'gpt-4o-mini', messages: [{ role: 'user', content: prompt }], temperature: 0.0, response_format: { type: "json_object" } });
                 const analiseIA = completion.choices[0].message.content;
                 if (analiseIA) {
@@ -616,7 +660,8 @@ app.post('/api/assessment/:assessmentId/submit', async (req: Request, res: Respo
                 }
             } catch (aiError) {
                 console.error("Erro na chamada para a OpenAI (em segundo plano):", aiError);
-                await baserowServer.patch(RESULTADOS_TABLE_ID, resultRecord.id, { analise_ia: JSON.stringify({ error: "Falha ao gerar análise da IA." }) });
+                const errorJson = JSON.stringify({ error: "Falha ao gerar análise da IA." });
+                await baserowServer.patch(RESULTADOS_TABLE_ID, resultRecord.id, { analise_ia: errorJson });
             }
         })();
         res.status(200).json({ success: true, message: "Avaliação concluída com sucesso!" });
