@@ -378,22 +378,29 @@ app.get('/api/data/all/:userId', async (req: Request, res: Response) => {
       return false;
     });
 
+    // CORREÇÃO FINAL: Normaliza o campo 'vaga' para ser sempre um objeto de relação.
     const syncedCandidates = userCandidatesRaw.map((candidate: BaserowCandidate) => {
       const newCandidate = { ...candidate };
       let vagaLink: { id: number; value: string }[] | null = null;
 
+      // Cenário A: Vaga é um texto (vem do WhatsApp)
       if (candidate.vaga && typeof candidate.vaga === 'string') {
-        const jobMatch = jobsMapByTitle.get(candidate.vaga.toLowerCase().trim());
+        const jobTitle = candidate.vaga.toLowerCase().trim();
+        const jobMatch = jobsMapByTitle.get(jobTitle);
         if (jobMatch) {
+          // Converte o texto para um objeto de relação que o frontend entende
           vagaLink = [{ id: jobMatch.id, value: jobMatch.titulo }];
         }
-      } else if (candidate.vaga && Array.isArray(candidate.vaga) && candidate.vaga.length > 0) {
+      } 
+      // Cenário B: Vaga já é um objeto de relação (vem do cadastro normal)
+      else if (candidate.vaga && Array.isArray(candidate.vaga) && candidate.vaga.length > 0) {
         const linkedVaga = candidate.vaga[0] as { id: number; value: string };
-        const jobMatch = jobsMapById.get(linkedVaga.id);
-        if (jobMatch) {
-          vagaLink = [{ id: jobMatch.id, value: jobMatch.titulo }];
+        // Apenas confirma se a vaga pertence ao usuário antes de repassá-la
+        if (jobsMapById.has(linkedVaga.id)) {
+          vagaLink = [{ id: linkedVaga.id, value: linkedVaga.value }];
         }
       }
+      
       return { ...newCandidate, vaga: vagaLink };
     });
     
