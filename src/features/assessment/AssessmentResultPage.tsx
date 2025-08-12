@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams } from 'react-router-dom';
-import { Loader2, BrainCircuit, Star, Zap, ShieldAlert, CheckCircle, TrendingUp, TrendingDown, Users, CheckSquare } from 'lucide-react';
+import { Loader2, BrainCircuit, Star, Zap, ShieldAlert, CheckCircle, TrendingUp, TrendingDown, Users, CheckSquare, Target, Trophy, Smile } from 'lucide-react';
 import BehavioralProfileChart from '../results/components/BehavioralProfileChart';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
@@ -11,10 +11,10 @@ interface AnaliseIA {
   perfil_principal: string;
   perfil_secundario: string;
   resumo_comportamental: string;
+  subcaracteristicas: string[];
   pontos_fortes_contextuais: string[];
   pontos_de_atencao: string[];
-  subcaracteristicas?: string[]; // NOVO
-  indicadores_situacionais?: { // NOVO
+  indicadores_situacionais: {
       exigencia_meio: string;
       aproveitamento: string;
       autoconfianca: string;
@@ -29,6 +29,22 @@ interface ProfileResult {
   analista: number;
   analise_ia: string | null;
 }
+
+const ProfileBar: React.FC<{ name: string; value: number; color: string; icon: React.FC<any> }> = ({ name, value, color, icon: Icon }) => (
+    <div>
+        <div className="flex justify-between items-center mb-1">
+            <div className="flex items-center">
+                <Icon className={`w-4 h-4 mr-2 ${color}`} />
+                <span className="text-sm font-semibold text-gray-700">{name}</span>
+            </div>
+            <span className={`text-sm font-bold ${color}`}>{value.toFixed(1)}%</span>
+        </div>
+        <div className="w-full bg-gray-200 rounded-full h-2">
+            <div className={`${color.replace('text-', 'bg-').replace('-600', '-500')} h-2 rounded-full`} style={{ width: `${value}%` }}></div>
+        </div>
+    </div>
+);
+
 
 const AssessmentResultPage: React.FC = () => {
     const { assessmentId } = useParams<{ assessmentId: string }>();
@@ -97,7 +113,7 @@ const AssessmentResultPage: React.FC = () => {
     
     if (error || !result) { return <div className="min-h-screen flex items-center justify-center bg-gray-100 p-4"><p className="text-red-500">{error || 'Resultado não encontrado.'}</p></div>; }
 
-    const profileNameMapping: { [key: string]: { color: string, icon: React.FC<any> } } = {
+    const profileStyles: { [key: string]: { color: string; icon: React.FC<any> } } = {
         Executor: { color: 'text-red-600', icon: Zap },
         Comunicador: { color: 'text-yellow-600', icon: Users },
         Planejador: { color: 'text-green-600', icon: CheckSquare },
@@ -113,17 +129,20 @@ const AssessmentResultPage: React.FC = () => {
                     <p className="text-lg text-gray-500 mt-2">Veja como seus traços se manifestam no ambiente de trabalho.</p>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-5 gap-8 items-center">
-                    <div className="md:col-span-2">
-                        <BehavioralProfileChart profileData={result} />
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-8 items-center">
+                    <div className="space-y-4">
+                        <ProfileBar name="Executor" value={result.executor} color="text-red-600" icon={Zap} />
+                        <ProfileBar name="Comunicador" value={result.comunicador} color="text-yellow-600" icon={Users} />
+                        <ProfileBar name="Planejador" value={result.planejador} color="text-green-600" icon={CheckSquare} />
+                        <ProfileBar name="Analista" value={result.analista} color="text-blue-600" icon={BrainCircuit} />
                     </div>
-                    <div className="md:col-span-3 text-center md:text-left">
+                     <div className="text-center md:text-left">
                         {parsedAIResult && !parsedAIResult.error ? (
                             <>
                                 {(() => {
                                     const mainProfile = parsedAIResult.perfil_principal;
-                                    const Icon = profileNameMapping[mainProfile]?.icon || BrainCircuit;
-                                    const color = profileNameMapping[mainProfile]?.color || 'text-gray-600';
+                                    const Icon = profileStyles[mainProfile]?.icon || BrainCircuit;
+                                    const color = profileStyles[mainProfile]?.color || 'text-gray-600';
                                     return (
                                         <>
                                             <p className="text-sm font-semibold text-gray-500">SEU PERFIL DOMINANTE É</p>
@@ -140,7 +159,7 @@ const AssessmentResultPage: React.FC = () => {
                             <div className="flex flex-col items-center justify-center h-full p-6 bg-gray-50 rounded-lg">
                                 <Loader2 className="h-8 w-8 text-gray-400 animate-spin" />
                                 <p className="mt-3 font-semibold text-gray-600">A análise da IA está sendo gerada...</p>
-                                <p className="mt-1 text-sm text-gray-500">Isso pode levar alguns instantes. A página será atualizada automaticamente.</p>
+                                <p className="mt-1 text-sm text-gray-500">Isso pode levar alguns instantes.</p>
                             </div>
                         )}
                     </div>
@@ -148,12 +167,21 @@ const AssessmentResultPage: React.FC = () => {
 
                 {parsedAIResult && !parsedAIResult.error && (
                     <>
+                        <div className="mt-12">
+                             <h4 className="flex items-center text-xl font-semibold text-gray-800 mb-4"><Star className="h-6 w-6 text-indigo-500 mr-2" />Subcaracterísticas</h4>
+                             <div className="flex flex-wrap gap-3">
+                                {parsedAIResult.subcaracteristicas.map((item, index) => (
+                                    <span key={index} className="px-3 py-1 bg-indigo-100 text-indigo-800 text-sm font-semibold rounded-full">{item}</span>
+                                ))}
+                             </div>
+                        </div>
+
                         <div className="mt-12 grid grid-cols-1 md:grid-cols-2 gap-8">
                             <div>
                                 <h4 className="flex items-center text-xl font-semibold text-gray-800 mb-4"><TrendingUp className="h-6 w-6 text-green-500 mr-2" />Pontos Fortes</h4>
                                 <ul className="space-y-3">
                                     {parsedAIResult.pontos_fortes_contextuais.map((point, index) => (
-                                        <li key={index} className="flex items-start"><Star className="h-5 w-5 text-yellow-400 mr-3 mt-1 flex-shrink-0" /><span className="text-gray-600">{point}</span></li>
+                                        <li key={index} className="flex items-start"><CheckCircle className="h-5 w-5 text-green-400 mr-3 mt-1 flex-shrink-0" /><span className="text-gray-600">{point}</span></li>
                                     ))}
                                 </ul>
                             </div>
@@ -165,6 +193,24 @@ const AssessmentResultPage: React.FC = () => {
                                     ))}
                                 </ul>
                             </div>
+                        </div>
+
+                        <div className="mt-12">
+                             <h4 className="flex items-center text-xl font-semibold text-gray-800 mb-4"><Target className="h-6 w-6 text-gray-500 mr-2" />Indicadores Situacionais</h4>
+                             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-center">
+                                <div className="bg-gray-50 p-4 rounded-lg border">
+                                    <p className="font-semibold text-gray-700">Exigência do Meio</p>
+                                    <p className="text-2xl font-bold text-indigo-600 mt-1">{parsedAIResult.indicadores_situacionais.exigencia_meio}</p>
+                                </div>
+                                 <div className="bg-gray-50 p-4 rounded-lg border">
+                                    <p className="font-semibold text-gray-700">Aproveitamento</p>
+                                    <p className="text-2xl font-bold text-indigo-600 mt-1">{parsedAIResult.indicadores_situacionais.aproveitamento}</p>
+                                </div>
+                                 <div className="bg-gray-50 p-4 rounded-lg border">
+                                    <p className="font-semibold text-gray-700">Autoconfiança</p>
+                                    <p className="text-2xl font-bold text-indigo-600 mt-1">{parsedAIResult.indicadores_situacionais.autoconfianca}</p>
+                                </div>
+                             </div>
                         </div>
                     </>
                 )}
