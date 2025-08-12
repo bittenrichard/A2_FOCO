@@ -506,12 +506,6 @@ app.post('/api/google/calendar/create-event', async (req: Request, res: Response
 const adjetivos = [
   'Alegre', 'Animado', 'Anti-Social', 'Arrogante', 'Ativo', 'Bem-Quisto', 'Bom Companheiro', 'Calculista', 'Calmo', 'Compreensivo', 'Cumpridor', 'Decidido', 'Dedicado', 'Depressivo', 'Desconfiado', 'Egocêntrico', 'Egoísta', 'Empolgante', 'Enérgico', 'Entusiasta', 'Estrovertido', 'Exuberante', 'Firme', 'Frio', 'Habilidoso', 'Inflexível', 'Influenciador', 'Ingênuo', 'Inseguro', 'Insensível', 'Audacioso (Ousado)', 'Auto-Disciplinado', 'Auto-Suficiente', 'Barulhento', 'Bem-Humorado', 'Comunicativo', 'Conservador', 'Contagiante', 'Corajoso', 'Crítico', 'Desmotivado', 'Desorganizado', 'Destacado', 'Discreto', 'Eficiente', 'Equilibrado', 'Espalhafatoso', 'Estimulante', 'Exagerado', 'Exigente', 'Idealista', 'Impaciente', 'Indeciso', 'Independente', 'Indisciplinado', 'Intolerante', 'Introvertido', 'Leal', 'Líder', 'Medroso', 'Minucioso', 'Modesto', 'Orgulhoso', 'Otimista', 'Paciente', 'Perfeccionista', 'Persistente', 'Pessimista', 'Popular', 'Prático', 'Pretensioso', 'Procrastinator', 'Racional', 'Reservado', 'Resoluto (Decidido)', 'Rotineiro', 'Sarcástico', 'Sensível', 'Sentimental', 'Simpático', 'Sincero', 'Temeroso', 'Teórico', 'Tranquilo', 'Vaidoso', 'Vingativo'
 ];
-const perfilMap: { [key: string]: string } = {
-    'Audacioso (Ousado)': 'E', 'Líder': 'E', 'Exigente': 'E', 'Decidido': 'E', 'Independente': 'E', 'Corajoso': 'E', 'Firme': 'E', 'Ativo': 'E', 'Enérgico': 'E',
-    'Comunicativo': 'C', 'Popular': 'C', 'Entusiasta': 'C', 'Otimista': 'C', 'Contagiante': 'C', 'Influenciador': 'C', 'Alegre': 'C', 'Animado': 'C', 'Simpático': 'C',
-    'Calmo': 'P', 'Paciente': 'P', 'Leal': 'P', 'Tranquilo': 'P', 'Conservador': 'P', 'Dedicado': 'P', 'Compreensivo': 'P', 'Bom Companheiro': 'P', 'Modesto': 'P',
-    'Perfeccionista': 'A', 'Minucioso': 'A', 'Racional': 'A', 'Calculista': 'A', 'Crítico': 'A', 'Prático': 'A', 'Auto-Disciplinado': 'A', 'Eficiente': 'A', 'Cumpridor': 'A'
-};
 
 app.post('/api/candidates/:candidateId/create-assessment', async (req: Request, res: Response) => {
     const { candidateId } = req.params;
@@ -554,21 +548,7 @@ app.post('/api/assessment/:assessmentId/submit', async (req: Request, res: Respo
     }
 
     try {
-        const scores: { [key: string]: number } = { E: 0, C: 0, P: 0, A: 0 };
-        const allSelected = [...(passo1 || []), ...(passo2 || []), ...(passo3 || [])];
-        allSelected.forEach(adjetivo => {
-            const perfil = perfilMap[adjetivo];
-            if (perfil) { scores[perfil] = (scores[perfil] || 0) + 1; }
-        });
-
-        const total = Object.values(scores).reduce((sum, val) => sum + val, 0);
-        const finalScores = {
-            executor: total > 0 ? parseFloat(((scores.E / total) * 100).toFixed(2)) : 0,
-            comunicador: total > 0 ? parseFloat(((scores.C / total) * 100).toFixed(2)) : 0,
-            planejador: total > 0 ? parseFloat(((scores.P / total) * 100).toFixed(2)) : 0,
-            analista: total > 0 ? parseFloat(((scores.A / total) * 100).toFixed(2)) : 0,
-        };
-
+        // Busca os dados da avaliação para obter o ID do candidato
         const assessmentData = await baserowServer.getRow(AVALIACOES_TABLE_ID, parseInt(assessmentId));
         if (!assessmentData?.candidato?.length) {
             throw new Error(`Nenhum candidato encontrado para a avaliação ID: ${assessmentId}`);
@@ -582,7 +562,6 @@ app.post('/api/assessment/:assessmentId/submit', async (req: Request, res: Respo
             body: JSON.stringify({
                 assessmentId: parseInt(assessmentId),
                 candidateId: candidateId,
-                scores: finalScores,
                 respostas: {
                     passo1: passo1 || [],
                     passo2: passo2 || [],
@@ -597,25 +576,9 @@ app.post('/api/assessment/:assessmentId/submit', async (req: Request, res: Respo
             throw new Error(`O webhook do n8n respondeu com o status: ${n8nResponse.status}`);
         }
         
-        const analiseIA = await n8nResponse.json();
-        console.log("Análise recebida do n8n com sucesso.");
-
-        await baserowServer.post(RESULTADOS_TABLE_ID, {
-            avaliacao: [parseInt(assessmentId)],
-            ...finalScores,
-            respostas_passo1: JSON.stringify(passo1),
-            respostas_passo2: JSON.stringify(passo2),
-            respostas_passo3: JSON.stringify(passo3),
-            analise_ia: JSON.stringify(analiseIA)
-        });
-
-        if (analiseIA.perfil_principal && candidateId) {
-            await baserowServer.patch(CANDIDATOS_TABLE_ID, candidateId, {
-                perfil_comportamental: analiseIA.perfil_principal
-            });
-        }
-
-        await baserowServer.patch(AVALIACOES_TABLE_ID, parseInt(assessmentId), { status: 'Concluído' });
+        // Com a arquitetura "Respond to Webhook", o N8N já terá feito a análise e salvo no banco.
+        // Aqui, apenas confirmamos que o processo foi concluído.
+        console.log("Resposta recebida do n8n com sucesso.");
         
         res.status(200).json({ success: true, message: "Avaliação concluída e analisada com sucesso!" });
 
