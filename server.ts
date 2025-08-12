@@ -588,6 +588,7 @@ app.get('/api/assessment/:token', async (req: Request, res: Response) => {
 app.post('/api/assessment/:assessmentId/submit', async (req: Request, res: Response) => {
     const { assessmentId } = req.params;
     const { passo1, passo2, passo3 } = req.body;
+
     try {
         const scores: { [key: string]: number } = { E: 0, C: 0, P: 0, A: 0 };
         const allSelected = [...(passo1 || []), ...(passo2 || []), ...(passo3 || [])];
@@ -595,6 +596,7 @@ app.post('/api/assessment/:assessmentId/submit', async (req: Request, res: Respo
             const perfil = perfilMap[adjetivo];
             if (perfil) { scores[perfil] = (scores[perfil] || 0) + 1; }
         });
+
         const total = Object.values(scores).reduce((sum, val) => sum + val, 0);
         const finalScores = {
             executor: total > 0 ? parseFloat(((scores.E / total) * 100).toFixed(2)) : 0,
@@ -603,35 +605,27 @@ app.post('/api/assessment/:assessmentId/submit', async (req: Request, res: Respo
             analista: total > 0 ? parseFloat(((scores.A / total) * 100).toFixed(2)) : 0,
         };
         
-        let analiseIA = JSON.stringify({ error: "Falha ao gerar análise da IA." });
+        // Tentativa de gerar análise da IA, com fallback.
+        let analiseIA = null;
         const prompt = `
+# INSTRUÇÃO
+Responda APENAS com o objeto JSON solicitado, sem nenhum texto adicional, introduções ou explicações.
+
 # PERSONA
 Você é um Analista Comportamental Sênior, especialista certificado na metodologia DISC. Sua comunicação é clara, objetiva e sempre construtiva. Sua análise vai além dos rótulos, focando em como os traços se manifestam no ambiente de trabalho.
+
 # OBJETIVO
-Analisar os dados de um perfil DISC para gerar um resumo coeso e prático, identificando o perfil predominante, os pontos fortes e os pontos de atenção, considerando o contexto de uma vaga ou do desenvolvimento profissional.
+Analisar os dados de um perfil DISC para gerar um resumo coeso e prático, identificando o perfil predominante, os pontos fortes e os pontos de atenção.
+
 # DADOS DE ENTRADA
-- **Contexto da Análise:** "Análise de perfil para desenvolvimento profissional e adequação geral a um ambiente de trabalho corporativo."
 - **Scores Percentuais:**
     - Executor (Dominância): ${finalScores.executor}%
     - Comunicador (Influência): ${finalScores.comunicador}%
     - Planejador (Estabilidade): ${finalScores.planejador}%
     - Analista (Conformidade): ${finalScores.analista}%
 - **Adjetivos Selecionados:** ${JSON.stringify(allSelected)}
-# PROCESSO DE ANÁLISE (Passo a Passo)
-1.  **Identificar Perfil Principal e Secundário:**
-    * O \`perfil_principal\` é o fator com a maior pontuação.
-    * Identifique também o segundo fator com maior pontuação, pois ele modula e enriquece a análise do perfil principal.
-2.  **Elaborar o Resumo:**
-    * Inicie o \`resumo_comportamental\` descrevendo o perfil principal.
-    * Explique como o perfil secundário influencia o principal. (Ex: "Um perfil Executor com um forte componente Analista tende a tomar decisões baseadas em dados, sendo menos impulsivo que um Executor puro.")
-    * Incorpore os \`Adjetivos Selecionados\` no resumo para personalizar a análise e torná-la menos genérica. (Ex: "Sua natureza de Planejador se manifesta através de uma abordagem 'cuidadosa' e 'persistente'...")
-3.  **Avaliar Pontos Fortes:**
-    * Baseado no **Contexto da Análise**, liste comportamentos e traços do perfil que são altamente benéficos.
-4.  **Avaliar Pontos a Desenvolver:**
-    * Baseado no **Contexto da Análise**, identifique traços que podem ser desafios.
-    * **IMPORTANTE:** Use uma linguagem construtiva. Troque "pontos fracos" por "pontos de atenção" ou "desafios a gerenciar".
+
 # ESTRUTURA DE SAÍDA (JSON)
-Sua resposta final deve ser **APENAS** o objeto JSON abaixo, sem textos ou explicações adicionais fora dele.
 \`\`\`json
 {
   "perfil_principal": "O nome do perfil com a maior pontuação (Executor, Comunicador, Planejador ou Analista)",
@@ -649,33 +643,44 @@ Sua resposta final deve ser **APENAS** o objeto JSON abaixo, sem textos ou expli
 \`\`\`
 `;
         try {
-            const completion = await openai.chat.completions.create({ model: 'gpt-4o-mini', messages: [{ role: 'user', content: prompt }], temperature: 0.0, response_format: { type: "json_object" } });
-            analiseIA = completion.choices[0].message.content || analiseIA;
+            console.log("Tentando chamada para OpenAI...");
+            const completion = await openai.chat.completions.create({ model: 'gpt-4o-mini', messages: [{ role: 'user', content: prompt }], temperature: 0.1, response_format: { type: "json_object" } });
+            if (completion.choices[0].message.content) {
+                analiseIA = completion.choices[0].message.content;
+            }
         } catch (aiError) {
             console.error("Erro na chamada para a OpenAI, tentando fallback para Groq:", aiError);
             try {
+                console.log("Tentando chamada para Groq...");
                 const completion = await groq.chat.completions.create({
                     messages: [{ role: 'user', content: prompt }],
                     model: 'llama3-8b-8192',
-                    temperature: 0.0,
+                    temperature: 0.1,
                     response_format: { type: "json_object" }
                 });
-                analiseIA = completion.choices[0].message.content || analiseIA;
+                if (completion.choices[0].message.content) {
+                    analiseIA = completion.choices[0].message.content;
+                }
             } catch (groqError) {
                 console.error("Erro na chamada para o Groq:", groqError);
             }
         }
         
+        // Se a análise da IA falhou, `analiseIA` será null. O campo no Baserow ficará vazio.
         await baserowServer.post(RESULTADOS_TABLE_ID, {
             avaliacao: [parseInt(assessmentId)], ...finalScores,
             respostas_passo1: JSON.stringify(passo1), respostas_passo2: JSON.stringify(passo2), respostas_passo3: JSON.stringify(passo3),
-            analise_ia: analiseIA
+            analise_ia: analiseIA // Salva o JSON como string ou null
         });
+
+        // Marca a avaliação como concluída independentemente do sucesso da IA
         await baserowServer.patch(AVALIACOES_TABLE_ID, parseInt(assessmentId), { status: 'Concluído' });
         
         res.status(200).json({ success: true, message: "Avaliação concluída com sucesso!" });
+
     } catch (error) {
-        console.error("Erro ao submeter avaliação:", error);
+        // Este erro agora só deve acontecer se o Baserow falhar.
+        console.error("Erro ao submeter avaliação (falha ao salvar no banco):", error);
         res.status(500).json({ error: 'Não foi possível processar sua avaliação.' });
     }
 });
@@ -686,7 +691,7 @@ app.get('/api/assessment/result/:assessmentId', async (req: Request, res: Respon
         const { results } = await baserowServer.get(RESULTADOS_TABLE_ID, `?filter__avaliacao__link_row_has=${assessmentId}`);
         if (results && results.length > 0) {
             const profileData = results[0];
-            try { profileData.analise_ia = JSON.parse(profileData.analise_ia); } catch (e) {}
+            // O campo 'analise_ia' pode ser nulo ou uma string JSON. O frontend irá tratar isso.
             res.json({ success: true, result: profileData });
         } else {
             res.status(404).json({ error: "Resultado da avaliação não encontrado." });

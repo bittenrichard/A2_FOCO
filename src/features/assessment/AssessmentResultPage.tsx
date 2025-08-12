@@ -7,55 +7,80 @@ import BehavioralProfileChart from '../results/components/BehavioralProfileChart
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
 
+// Interface para garantir a tipagem correta da análise da IA
+interface AnaliseIA {
+  perfil_principal: string;
+  perfil_secundario: string;
+  resumo_comportamental: string;
+  pontos_fortes_contextuais: string[];
+  pontos_de_atencao: string[];
+  error?: string; // Adicionado para tratar possíveis erros
+}
+
 interface ProfileResult {
   executor: number;
   comunicador: number;
   planejador: number;
   analista: number;
-  analise_ia: {
-    perfil_principal: string;
-    perfil_secundario: string;
-    resumo_comportamental: string;
-    pontos_fortes_contextuais: string[];
-    pontos_de_atencao: string[];
-    error?: string;
-  } | null;
+  analise_ia: string | null; // O backend agora pode enviar string ou null
 }
 
 const AssessmentResultPage: React.FC = () => {
   const { assessmentId } = useParams<{ assessmentId: string }>();
   const [result, setResult] = useState<ProfileResult | null>(null);
+  const [parsedAIResult, setParsedAIResult] = useState<AnaliseIA | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isPolling, setIsPolling] = useState(false);
 
   useEffect(() => {
     const fetchResult = async () => {
+      if (!isPolling) setIsLoading(true); // Mostra o spinner inicial
       try {
         const response = await fetch(`${API_BASE_URL}/api/assessment/result/${assessmentId}`);
         const data = await response.json();
         if (!response.ok) {
           throw new Error(data.error || 'Não foi possível carregar o resultado.');
         }
+
+        // Tenta processar a análise da IA de forma segura
+        if (data.result?.analise_ia) {
+          try {
+            const parsed = JSON.parse(data.result.analise_ia);
+            setParsedAIResult(parsed);
+          } catch (e) {
+            console.error("A análise da IA não é um JSON válido:", data.result.analise_ia);
+            setParsedAIResult(null); // Define como nulo se houver erro de parse
+          }
+        } else {
+            setParsedAIResult(null); // Garante que esteja nulo se não houver análise
+        }
+
         setResult(data.result);
+        setError(null);
+
       } catch (err: any) {
         setError(err.message);
       } finally {
         setIsLoading(false);
+        setIsPolling(false);
       }
     };
 
+    fetchResult();
+
+    // Inicia o polling somente se a análise da IA ainda não chegou
     const intervalId = setInterval(() => {
-        // Para o polling quando os dados chegam ou se houver erro
-        if (result || error) {
-            clearInterval(intervalId);
-            return;
-        }
+      if (!parsedAIResult && !error) {
+        setIsPolling(true);
         fetchResult();
+      } else {
+        clearInterval(intervalId);
+      }
     }, 5000); // Tenta a cada 5 segundos
 
-    fetchResult(); // Busca inicial
-    return () => clearInterval(intervalId); // Limpa o intervalo ao sair da página
-  }, [assessmentId, result, error]);
+    return () => clearInterval(intervalId);
+  }, [assessmentId, parsedAIResult, error]);
 
 
   if (isLoading) {
@@ -74,8 +99,6 @@ const AssessmentResultPage: React.FC = () => {
       </div>
     );
   }
-  
-  const { analise_ia } = result;
 
   return (
     <div className="min-h-screen bg-gray-100 py-12 px-4">
@@ -91,12 +114,12 @@ const AssessmentResultPage: React.FC = () => {
             <BehavioralProfileChart profileData={result} />
           </div>
           <div className="text-center md:text-left">
-            {analise_ia && !analise_ia.error ? (
+            {parsedAIResult && !parsedAIResult.error ? (
                 <>
                     <h3 className="text-2xl font-bold text-gray-800">Perfil Principal</h3>
-                    <p className="text-3xl font-extrabold text-indigo-600 mt-1">{analise_ia.perfil_principal}</p>
-                     <p className="text-lg font-semibold text-gray-500 mt-1">com influência de {analise_ia.perfil_secundario}</p>
-                    <p className="text-gray-700 mt-4 leading-relaxed">{analise_ia.resumo_comportamental}</p>
+                    <p className="text-3xl font-extrabold text-indigo-600 mt-1">{parsedAIResult.perfil_principal}</p>
+                     <p className="text-lg font-semibold text-gray-500 mt-1">com influência de {parsedAIResult.perfil_secundario}</p>
+                    <p className="text-gray-700 mt-4 leading-relaxed">{parsedAIResult.resumo_comportamental}</p>
                 </>
             ) : (
                 <div className="flex flex-col items-center justify-center h-full p-6 bg-gray-50 rounded-lg">
@@ -108,7 +131,7 @@ const AssessmentResultPage: React.FC = () => {
           </div>
         </div>
 
-        {analise_ia && !analise_ia.error && (
+        {parsedAIResult && !parsedAIResult.error && (
             <div className="mt-12 grid grid-cols-1 md:grid-cols-2 gap-8">
             <div>
                 <h4 className="flex items-center text-xl font-semibold text-gray-800 mb-4">
@@ -116,7 +139,7 @@ const AssessmentResultPage: React.FC = () => {
                 Pontos Fortes Contextuais
                 </h4>
                 <ul className="space-y-3">
-                {analise_ia.pontos_fortes_contextuais.map((point, index) => (
+                {parsedAIResult.pontos_fortes_contextuais.map((point, index) => (
                     <li key={index} className="flex items-start">
                     <Star className="h-5 w-5 text-yellow-400 mr-3 mt-1 flex-shrink-0" />
                     <span className="text-gray-600">{point}</span>
@@ -130,7 +153,7 @@ const AssessmentResultPage: React.FC = () => {
                 Pontos de Atenção
                 </h4>
                 <ul className="space-y-3">
-                {analise_ia.pontos_de_atencao.map((point, index) => (
+                {parsedAIResult.pontos_de_atencao.map((point, index) => (
                     <li key={index} className="flex items-start">
                     <BrainCircuit className="h-5 w-5 text-blue-400 mr-3 mt-1 flex-shrink-0" />
                     <span className="text-gray-600">{point}</span>
