@@ -322,25 +322,25 @@ app.get('/api/data/all/:userId', async (req: Request, res: Response) => {
 
   try {
     const jobsResult = await baserowServer.get(VAGAS_TABLE_ID, '');
-    const allJobs: BaserowJobPosting[] = (jobsResult.results || []) as BaserowJobPosting[];
+    const allJobs = (jobsResult.results || []) as any[];
     const userJobs = allJobs.filter((job) =>
-      job.usuario && job.usuario.some((user) => user.id === parseInt(userId))
+      job.usuario && job.usuario.some((user: any) => user.id === parseInt(userId))
     );
 
     const userJobIds = new Set(userJobs.map(job => job.id));
-    const jobsMapByTitle = new Map<string, BaserowJobPosting>(userJobs.map(job => [job.titulo.toLowerCase().trim(), job]));
-    const jobsMapById = new Map<number, BaserowJobPosting>(userJobs.map(job => [job.id, job]));
+    const jobsMapByTitle = new Map<string, any>(userJobs.map(job => [job.titulo.toLowerCase().trim(), job]));
+    const jobsMapById = new Map<number, any>(userJobs.map(job => [job.id, job]));
 
     const regularCandidatesResult = await baserowServer.get(CANDIDATOS_TABLE_ID, '');
     const whatsappCandidatesResult = await baserowServer.get(WHATSAPP_CANDIDATOS_TABLE_ID, '');
 
-    const allCandidatesRaw: BaserowCandidate[] = [
+    const allCandidatesRaw = [
       ...(regularCandidatesResult.results || []),
       ...(whatsappCandidatesResult.results || [])
-    ] as BaserowCandidate[];
+    ] as any[];
 
     const userCandidatesRaw = allCandidatesRaw.filter((candidate) => {
-      if (candidate.usuario && candidate.usuario.some((u) => u.id === parseInt(userId))) {
+      if (candidate.usuario && candidate.usuario.some((u: any) => u.id === parseInt(userId))) {
         return true;
       }
       if (typeof candidate.vaga === 'string' && candidate.vaga) {
@@ -549,7 +549,7 @@ app.post('/api/assessment/:assessmentId/submit', async (req: Request, res: Respo
 
     const n8nWebhookUrl = process.env.N8N_ASSESSMENT_WEBHOOK_URL;
     if (!n8nWebhookUrl) {
-        console.error("ERRO: A variável de ambiente N8N_ASSESSMENT_WEBHOOK_URL não está configurada.");
+        console.error("ERRO GRAVE: A variável de ambiente N8N_ASSESSMENT_WEBHOOK_URL não está configurada.");
         return res.status(500).json({ error: 'Integração com o sistema de análise não configurada.' });
     }
 
@@ -569,7 +569,7 @@ app.post('/api/assessment/:assessmentId/submit', async (req: Request, res: Respo
             analista: total > 0 ? parseFloat(((scores.A / total) * 100).toFixed(2)) : 0,
         };
         
-        console.log("Enviando dados para o webhook do n8n...");
+        console.log(`Enviando dados para o webhook do n8n: ${n8nWebhookUrl}`);
         const n8nResponse = await fetch(n8nWebhookUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -586,7 +586,7 @@ app.post('/api/assessment/:assessmentId/submit', async (req: Request, res: Respo
         }
         
         const analiseIA = await n8nResponse.json();
-        console.log("Análise recebida do n8n.");
+        console.log("Análise recebida do n8n com sucesso.");
 
         await baserowServer.post(RESULTADOS_TABLE_ID, {
             avaliacao: [parseInt(assessmentId)],
