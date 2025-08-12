@@ -30,9 +30,11 @@ app.use(express.urlencoded({ extended: true }));
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
+
 const groq = new Groq({
     apiKey: process.env.GROQ_API_KEY,
 });
+
 
 if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET || !process.env.GOOGLE_REDIRECT_URI) {
   console.error("ERRO CRÍTICO: As credenciais do Google não foram encontradas...");
@@ -81,20 +83,35 @@ app.post('/api/auth/signup', async (req: Request, res: Response) => {
   if (!email || !password || !nome) {
     return res.status(400).json({ error: 'Nome, email e senha são obrigatórios.' });
   }
+
   try {
     const emailLowerCase = email.toLowerCase();
     const { results: existingUsers } = await baserowServer.get(USERS_TABLE_ID, `?filter__Email__equal=${emailLowerCase}`);
+
     if (existingUsers && existingUsers.length > 0) {
       return res.status(409).json({ error: 'Este e-mail já está cadastrado.' });
     }
+
     const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS);
+
     const newUser = await baserowServer.post(USERS_TABLE_ID, {
-      nome, empresa, telefone, Email: emailLowerCase, senha_hash: hashedPassword,
+      nome,
+      empresa,
+      telefone,
+      Email: emailLowerCase,
+      senha_hash: hashedPassword,
     });
+
     const userProfile = {
-      id: newUser.id, nome: newUser.nome, email: newUser.Email, empresa: newUser.empresa, telefone: newUser.telefone,
-      avatar_url: newUser.avatar_url || null, google_refresh_token: newUser.google_refresh_token || null,
+      id: newUser.id,
+      nome: newUser.nome,
+      email: newUser.Email,
+      empresa: newUser.empresa,
+      telefone: newUser.telefone,
+      avatar_url: newUser.avatar_url || null,
+      google_refresh_token: newUser.google_refresh_token || null,
     };
+
     res.status(201).json({ success: true, user: userProfile });
   } catch (error: any) {
     console.error('Erro no registro (backend):', error);
@@ -107,18 +124,27 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
   if (!email || !password) {
     return res.status(400).json({ error: 'Email e senha são obrigatórios.' });
   }
+
   try {
     const emailLowerCase = email.toLowerCase();
     const { results: users } = await baserowServer.get(USERS_TABLE_ID, `?filter__Email__equal=${emailLowerCase}`);
     const user = users && users[0];
+
     if (!user || !user.senha_hash) {
       return res.status(401).json({ error: 'E-mail ou senha inválidos.' });
     }
+
     const passwordMatches = await bcrypt.compare(password, user.senha_hash);
+
     if (passwordMatches) {
       const userProfile = {
-        id: user.id, nome: user.nome, email: user.Email, empresa: user.empresa, telefone: user.telefone,
-        avatar_url: user.avatar_url || null, google_refresh_token: user.google_refresh_token || null,
+        id: user.id,
+        nome: user.nome,
+        email: user.Email,
+        empresa: user.empresa,
+        telefone: user.telefone,
+        avatar_url: user.avatar_url || null,
+        google_refresh_token: user.google_refresh_token || null,
       };
       res.json({ success: true, user: userProfile });
     } else {
@@ -133,22 +159,33 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
 app.patch('/api/users/:userId/profile', async (req: Request, res: Response) => {
   const { userId } = req.params;
   const { nome, empresa, avatar_url } = req.body;
+
   if (!userId) {
     return res.status(400).json({ error: 'ID do usuário é obrigatório.' });
   }
+
   try {
     const updatedData: Record<string, any> = {};
     if (nome !== undefined) updatedData.nome = nome;
     if (empresa !== undefined) updatedData.empresa = empresa;
     if (avatar_url !== undefined) updatedData.avatar_url = avatar_url;
+
     if (Object.keys(updatedData).length === 0) {
       return res.status(400).json({ error: 'Nenhum dado para atualizar.' });
     }
+
     const updatedUser = await baserowServer.patch(USERS_TABLE_ID, parseInt(userId), updatedData);
+
     const userProfile = {
-      id: updatedUser.id, nome: updatedUser.nome, email: updatedUser.Email, empresa: updatedUser.empresa, telefone: updatedUser.telefone,
-      avatar_url: updatedUser.avatar_url || null, google_refresh_token: updatedUser.google_refresh_token || null,
+      id: updatedUser.id,
+      nome: updatedUser.nome,
+      email: updatedUser.Email,
+      empresa: updatedUser.empresa,
+      telefone: updatedUser.telefone,
+      avatar_url: updatedUser.avatar_url || null,
+      google_refresh_token: updatedUser.google_refresh_token || null,
     };
+
     res.status(200).json({ success: true, user: userProfile });
   } catch (error: any) {
     console.error('Erro ao atualizar perfil (backend):', error);
@@ -159,12 +196,14 @@ app.patch('/api/users/:userId/profile', async (req: Request, res: Response) => {
 app.patch('/api/users/:userId/password', async (req: Request, res: Response) => {
   const { userId } = req.params;
   const { password } = req.body;
+
   if (!userId || !password) {
     return res.status(400).json({ error: 'ID do usuário e nova senha são obrigatórios.' });
   }
   if (password.length < 6) {
     return res.status(400).json({ error: 'A senha deve ter no mínimo 6 caracteres.' });
   }
+
   try {
     const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS);
     await baserowServer.patch(USERS_TABLE_ID, parseInt(userId), { senha_hash: hashedPassword });
@@ -186,8 +225,13 @@ app.get('/api/users/:userId', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Usuário não encontrado.' });
     }
     const userProfile = {
-      id: user.id, nome: user.nome, email: user.Email, empresa: user.empresa, telefone: user.telefone,
-      avatar_url: user.avatar_url || null, google_refresh_token: user.google_refresh_token || null,
+      id: user.id,
+      nome: user.nome,
+      email: user.Email,
+      empresa: user.empresa,
+      telefone: user.telefone,
+      avatar_url: user.avatar_url || null,
+      google_refresh_token: user.google_refresh_token || null,
     };
     res.json(userProfile);
   } catch (error: any) {
@@ -201,18 +245,28 @@ app.post('/api/upload-avatar', upload.single('avatar'), async (req: Request, res
   if (!userId || !req.file) {
     return res.status(400).json({ error: 'Arquivo e ID do usuário são obrigatórios.' });
   }
+
   try {
     const fileBuffer = req.file.buffer;
     const fileName = req.file.originalname;
     const mimetype = req.file.mimetype;
+
     const uploadedFile = await baserowServer.uploadFileFromBuffer(fileBuffer, fileName, mimetype);
     const newAvatarUrl = uploadedFile.url;
+
     const updatedUser = await baserowServer.patch(USERS_TABLE_ID, parseInt(userId), { avatar_url: newAvatarUrl });
+
     const userProfile = {
-      id: updatedUser.id, nome: updatedUser.nome, email: updatedUser.Email, empresa: updatedUser.empresa,
-      telefone: updatedUser.telefone, avatar_url: updatedUser.avatar_url || null, google_refresh_token: updatedUser.google_refresh_token || null,
+      id: updatedUser.id,
+      nome: updatedUser.nome,
+      email: updatedUser.Email,
+      empresa: updatedUser.empresa,
+      telefone: updatedUser.telefone,
+      avatar_url: updatedUser.avatar_url || null,
+      google_refresh_token: updatedUser.google_refresh_token || null,
     };
     res.json({ success: true, avatar_url: newAvatarUrl, user: userProfile });
+
   } catch (error: any) {
     console.error('Erro ao fazer upload de avatar (backend):', error);
     res.status(500).json({ error: error.message || 'Não foi possível fazer upload do avatar.' });
@@ -224,9 +278,15 @@ app.post('/api/jobs', async (req: Request, res: Response) => {
   if (!titulo || !descricao || !usuario || usuario.length === 0) {
     return res.status(400).json({ error: 'Título, descrição e ID do usuário são obrigatórios.' });
   }
+
   try {
     const createdJob = await baserowServer.post(VAGAS_TABLE_ID, {
-      titulo, descricao, Endereco: endereco, requisitos_obrigatorios, requisitos_desejaveis, usuario,
+      titulo,
+      descricao,
+      Endereco: endereco,
+      requisitos_obrigatorios,
+      requisitos_desejaveis,
+      usuario,
     });
     res.status(201).json(createdJob);
   } catch (error: any) {
@@ -241,6 +301,7 @@ app.patch('/api/jobs/:jobId', async (req: Request, res: Response) => {
   if (!jobId || Object.keys(updatedData).length === 0) {
     return res.status(400).json({ error: 'ID da vaga e dados para atualização são obrigatórios.' });
   }
+
   try {
     const updatedJob = await baserowServer.patch(VAGAS_TABLE_ID, parseInt(jobId), updatedData);
     res.json(updatedJob);
@@ -255,6 +316,7 @@ app.delete('/api/jobs/:jobId', async (req: Request, res: Response) => {
   if (!jobId) {
     return res.status(400).json({ error: 'ID da vaga é obrigatório.' });
   }
+
   try {
     await baserowServer.delete(VAGAS_TABLE_ID, parseInt(jobId));
     res.status(204).send();
@@ -267,13 +329,16 @@ app.delete('/api/jobs/:jobId', async (req: Request, res: Response) => {
 app.patch('/api/candidates/:candidateId/status', async (req: Request, res: Response) => {
   const { candidateId } = req.params;
   const { status } = req.body;
+
   if (!candidateId || !status) {
     return res.status(400).json({ error: 'ID do candidato e status são obrigatórios.' });
   }
+
   const validStatuses = ['Triagem', 'Entrevista', 'Aprovado', 'Reprovado'];
   if (!validStatuses.includes(status)) {
     return res.status(400).json({ error: 'Status inválido fornecido.' });
   }
+
   try {
     const updatedCandidate = await baserowServer.patch(CANDIDATOS_TABLE_ID, parseInt(candidateId), { status: status });
     res.json(updatedCandidate);
@@ -288,21 +353,26 @@ app.get('/api/data/all/:userId', async (req: Request, res: Response) => {
   if (!userId) {
     return res.status(400).json({ error: 'ID do usuário é obrigatório.' });
   }
+
   try {
     const jobsResult = await baserowServer.get(VAGAS_TABLE_ID, '');
     const allJobs: BaserowJobPosting[] = (jobsResult.results || []) as BaserowJobPosting[];
     const userJobs = allJobs.filter((job) =>
       job.usuario && job.usuario.some((user) => user.id === parseInt(userId))
     );
+
     const userJobIds = new Set(userJobs.map(job => job.id));
     const jobsMapByTitle = new Map<string, BaserowJobPosting>(userJobs.map(job => [job.titulo.toLowerCase().trim(), job]));
     const jobsMapById = new Map<number, BaserowJobPosting>(userJobs.map(job => [job.id, job]));
+
     const regularCandidatesResult = await baserowServer.get(CANDIDATOS_TABLE_ID, '');
     const whatsappCandidatesResult = await baserowServer.get(WHATSAPP_CANDIDATOS_TABLE_ID, '');
+
     const allCandidatesRaw: BaserowCandidate[] = [
       ...(regularCandidatesResult.results || []),
       ...(whatsappCandidatesResult.results || [])
     ] as BaserowCandidate[];
+
     const userCandidatesRaw = allCandidatesRaw.filter((candidate) => {
       if (candidate.usuario && candidate.usuario.some((u) => u.id === parseInt(userId))) {
         return true;
@@ -317,6 +387,7 @@ app.get('/api/data/all/:userId', async (req: Request, res: Response) => {
       }
       return false;
     });
+
     const syncedCandidates = userCandidatesRaw.map((candidate) => {
       const newCandidate = { ...candidate };
       let vagaLink: { id: number; value: string }[] | null = null;
@@ -333,7 +404,9 @@ app.get('/api/data/all/:userId', async (req: Request, res: Response) => {
       }
       return { ...newCandidate, vaga: vagaLink };
     });
+
     res.json({ jobs: userJobs, candidates: syncedCandidates });
+
   } catch (error: any) {
     console.error('Erro ao buscar todos os dados (backend):', error);
     res.status(500).json({ error: 'Falha ao carregar dados.' });
