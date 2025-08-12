@@ -9,8 +9,6 @@ import { google } from 'googleapis';
 import { baserowServer } from './src/shared/services/baserowServerClient.js';
 import bcrypt from 'bcryptjs';
 import multer from 'multer';
-import OpenAI from 'openai';
-import Groq from 'groq-sdk';
 import fetch from 'node-fetch';
 
 const app = express();
@@ -25,14 +23,6 @@ app.use(cors(corsOptions));
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
-
-const groq = new Groq({
-    apiKey: process.env.GROQ_API_KEY,
-});
 
 if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET || !process.env.GOOGLE_REDIRECT_URI) {
   console.error("ERRO CRÍTICO: As credenciais do Google não foram encontradas...");
@@ -505,7 +495,7 @@ app.post('/api/google/calendar/create-event', async (req: Request, res: Response
       'Detalhes': eventData.details, 'Candidato': [candidate.id], 'Vaga': [job.id], 'google_event_link': response.data.htmlLink
     });
     res.json({ success: true, message: 'Evento criado com sucesso!', data: response.data });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Erro ao criar evento no Google Calendar:', error);
     res.status(500).json({ success: false, message: 'Falha ao criar evento.' });
   }
