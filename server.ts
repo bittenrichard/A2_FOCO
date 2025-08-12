@@ -9,8 +9,7 @@ import { google } from 'googleapis';
 import { baserowServer } from './src/shared/services/baserowServerClient.js';
 import bcrypt from 'bcryptjs';
 import multer from 'multer';
-import OpenAI from 'openai';
-import Groq from 'groq-sdk';
+import fetch from 'node-fetch';
 
 const app = express();
 const port = 3001;
@@ -24,16 +23,6 @@ app.use(cors(corsOptions));
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-
-// --- CONFIGURAÇÃO DAS IAs ---
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
-
-const groq = new Groq({
-    apiKey: process.env.GROQ_API_KEY,
-});
-
 
 if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET || !process.env.GOOGLE_REDIRECT_URI) {
   console.error("ERRO CRÍTICO: As credenciais do Google não foram encontradas...");
@@ -54,29 +43,6 @@ const AGENDAMENTOS_TABLE_ID = '713';
 const AVALIACOES_TABLE_ID = '727';
 const RESULTADOS_TABLE_ID = '728';
 const SALT_ROUNDS = 10;
-
-interface BaserowJobPosting {
-  id: number;
-  titulo: string;
-  usuario?: { id: number; value: string }[];
-}
-
-interface BaserowCandidate {
-  id: number;
-  vaga?: { id: number; value: string }[] | string | null;
-  usuario?: { id: number; value: string }[] | null;
-  nome: string;
-  telefone: string | null;
-  curriculo?: { url: string; name: string }[] | null;
-  score?: number | null;
-  resumo_ia?: string | null;
-  status?: { id: number; value: 'Triagem' | 'Entrevista' | 'Aprovado' | 'Reprovado' } | null;
-  data_triagem?: string;
-  sexo?: string | null;
-  escolaridade?: string | null;
-  idade?: number | null;
-  perfil_comportamental?: string | null;
-}
 
 app.post('/api/auth/signup', async (req: Request, res: Response) => {
   const { nome, empresa, telefone, email, password } = req.body;
@@ -577,59 +543,15 @@ app.get('/api/assessment/:token', async (req: Request, res: Response) => {
     }
 });
 
-const processarAnaliseIA = async (resultId: number, finalScores: any, allSelected: string[], assessmentId: number) => {
-    const prompt = `
-# INSTRUÇÃO
-Responda APENAS com o objeto JSON solicitado, sem nenhum texto adicional.
-# PERSONA
-Você é um Analista Comportamental Sênior, especialista em DISC.
-# OBJETIVO
-Analisar dados de perfil DISC e gerar um relatório completo.
-# DADOS DE ENTRADA
-- Scores: Executor: ${finalScores.executor}%, Comunicador: ${finalScores.comunicador}%, Planejador: ${finalScores.planejador}%, Analista: ${finalScores.analista}%
-- Adjetivos: ${JSON.stringify(allSelected)}
-# ESTRUTURA DE SAÍDA (JSON OBRIGATÓRIA)
-{
-  "perfil_principal": "...", "perfil_secundario": "...", "resumo_comportamental": "...",
-  "subcaracteristicas": ["..."], "pontos_fortes_contextuais": ["..."], "pontos_de_atencao": ["..."],
-  "indicadores_situacionais": {"exigencia_meio": "...", "aproveitamento": "...", "autoconfianca": "..."}
-}`;
-
-    let analiseIA = null;
-    try {
-        console.log("Tentando chamada para OpenAI...");
-        const completion = await openai.chat.completions.create({ model: 'gpt-4o-mini', messages: [{ role: 'user', content: prompt }], temperature: 0.1, response_format: { type: "json_object" } });
-        analiseIA = completion.choices[0].message.content;
-    } catch (aiError) {
-        console.error("Erro na OpenAI, tentando Groq:", aiError);
-        try {
-            const completion = await groq.chat.completions.create({ messages: [{ role: 'user', content: prompt }], model: 'llama3-8b-8192', temperature: 0.1, response_format: { type: "json_object" } });
-            analiseIA = completion.choices[0].message.content;
-        } catch (groqError) {
-            console.error("Erro no Groq:", groqError);
-        }
-    }
-
-    if (analiseIA) {
-        try {
-            await baserowServer.patch(RESULTADOS_TABLE_ID, resultId, { analise_ia: analiseIA });
-            const assessmentData = await baserowServer.getRow(AVALIACOES_TABLE_ID, assessmentId);
-            if (assessmentData?.candidato?.length > 0) {
-                const candidateId = assessmentData.candidato[0].id;
-                const perfilPrincipal = JSON.parse(analiseIA).perfil_principal;
-                if (perfilPrincipal && candidateId) {
-                    await baserowServer.patch(CANDIDATOS_TABLE_ID, candidateId, { perfil_comportamental: perfilPrincipal });
-                }
-            }
-        } catch (error) {
-            console.error("Erro ao salvar a análise da IA no banco:", error);
-        }
-    }
-};
-
 app.post('/api/assessment/:assessmentId/submit', async (req: Request, res: Response) => {
     const { assessmentId } = req.params;
     const { passo1, passo2, passo3 } = req.body;
+
+    const n8nWebhookUrl = process.env.N8N_ASSESSMENT_WEBHOOK_URL;
+    if (!n8nWebhookUrl) {
+        console.error("ERRO: A variável de ambiente N8N_ASSESSMENT_WEBHOOK_URL não está configurada.");
+        return res.status(500).json({ error: 'Integração com o sistema de análise não configurada.' });
+    }
 
     try {
         const scores: { [key: string]: number } = { E: 0, C: 0, P: 0, A: 0 };
@@ -646,21 +568,52 @@ app.post('/api/assessment/:assessmentId/submit', async (req: Request, res: Respo
             planejador: total > 0 ? parseFloat(((scores.P / total) * 100).toFixed(2)) : 0,
             analista: total > 0 ? parseFloat(((scores.A / total) * 100).toFixed(2)) : 0,
         };
-
-        const newResult = await baserowServer.post(RESULTADOS_TABLE_ID, {
-            avaliacao: [parseInt(assessmentId)], ...finalScores,
-            respostas_passo1: JSON.stringify(passo1), respostas_passo2: JSON.stringify(passo2), respostas_passo3: JSON.stringify(passo3),
+        
+        console.log("Enviando dados para o webhook do n8n...");
+        const n8nResponse = await fetch(n8nWebhookUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                scores: finalScores,
+                adjetivos: allSelected
+            })
         });
 
+        if (!n8nResponse.ok) {
+            const errorBody = await n8nResponse.text();
+            console.error("Erro na resposta do n8n:", errorBody);
+            throw new Error(`O webhook do n8n respondeu com o status: ${n8nResponse.status}`);
+        }
+        
+        const analiseIA = await n8nResponse.json();
+        console.log("Análise recebida do n8n.");
+
+        await baserowServer.post(RESULTADOS_TABLE_ID, {
+            avaliacao: [parseInt(assessmentId)],
+            ...finalScores,
+            respostas_passo1: JSON.stringify(passo1),
+            respostas_passo2: JSON.stringify(passo2),
+            respostas_passo3: JSON.stringify(passo3),
+            analise_ia: JSON.stringify(analiseIA)
+        });
+
+        const assessmentData = await baserowServer.getRow(AVALIACOES_TABLE_ID, parseInt(assessmentId));
+        if (assessmentData?.candidato?.length > 0) {
+            const candidateId = assessmentData.candidato[0].id;
+            const perfilPrincipal = analiseIA.perfil_principal;
+            if (perfilPrincipal && candidateId) {
+                await baserowServer.patch(CANDIDATOS_TABLE_ID, candidateId, {
+                    perfil_comportamental: perfilPrincipal
+                });
+            }
+        }
+
         await baserowServer.patch(AVALIACOES_TABLE_ID, parseInt(assessmentId), { status: 'Concluído' });
-
-        res.status(200).json({ success: true, message: "Avaliação recebida! A análise está sendo processada." });
-
-        // A chamada da IA agora acontece em segundo plano, sem bloquear a resposta.
-        processarAnaliseIA(newResult.id, finalScores, allSelected, parseInt(assessmentId));
+        
+        res.status(200).json({ success: true, message: "Avaliação concluída e analisada com sucesso!" });
 
     } catch (error) {
-        console.error("Erro ao submeter avaliação (falha ao salvar no banco):", error);
+        console.error("Erro no processo de submissão da avaliação:", error);
         res.status(500).json({ error: 'Não foi possível processar sua avaliação.' });
     }
 });
