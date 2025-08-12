@@ -9,6 +9,8 @@ import { google } from 'googleapis';
 import { baserowServer } from './src/shared/services/baserowServerClient.js';
 import bcrypt from 'bcryptjs';
 import multer from 'multer';
+import OpenAI from 'openai';
+import Groq from 'groq-sdk';
 import fetch from 'node-fetch';
 
 const app = express();
@@ -23,6 +25,14 @@ app.use(cors(corsOptions));
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
+
+const groq = new Groq({
+    apiKey: process.env.GROQ_API_KEY,
+});
 
 if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET || !process.env.GOOGLE_REDIRECT_URI) {
   console.error("ERRO CRÍTICO: As credenciais do Google não foram encontradas...");
@@ -322,7 +332,7 @@ app.get('/api/data/all/:userId', async (req: Request, res: Response) => {
 
   try {
     const jobsResult = await baserowServer.get(VAGAS_TABLE_ID, '');
-    const allJobs = (jobsResult.results || []) as any[];
+    const allJobs: any[] = (jobsResult.results || []);
     const userJobs = allJobs.filter((job) =>
       job.usuario && job.usuario.some((user: any) => user.id === parseInt(userId))
     );
@@ -334,10 +344,10 @@ app.get('/api/data/all/:userId', async (req: Request, res: Response) => {
     const regularCandidatesResult = await baserowServer.get(CANDIDATOS_TABLE_ID, '');
     const whatsappCandidatesResult = await baserowServer.get(WHATSAPP_CANDIDATOS_TABLE_ID, '');
 
-    const allCandidatesRaw = [
+    const allCandidatesRaw: any[] = [
       ...(regularCandidatesResult.results || []),
       ...(whatsappCandidatesResult.results || [])
-    ] as any[];
+    ];
 
     const userCandidatesRaw = allCandidatesRaw.filter((candidate) => {
       if (candidate.usuario && candidate.usuario.some((u: any) => u.id === parseInt(userId))) {
