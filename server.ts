@@ -568,14 +568,26 @@ app.post('/api/assessment/:assessmentId/submit', async (req: Request, res: Respo
             planejador: total > 0 ? parseFloat(((scores.P / total) * 100).toFixed(2)) : 0,
             analista: total > 0 ? parseFloat(((scores.A / total) * 100).toFixed(2)) : 0,
         };
+
+        const assessmentData = await baserowServer.getRow(AVALIACOES_TABLE_ID, parseInt(assessmentId));
+        if (!assessmentData?.candidato?.length) {
+            throw new Error(`Nenhum candidato encontrado para a avaliação ID: ${assessmentId}`);
+        }
+        const candidateId = assessmentData.candidato[0].id;
         
         console.log(`Enviando dados para o webhook do n8n: ${n8nWebhookUrl}`);
         const n8nResponse = await fetch(n8nWebhookUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
+                assessmentId: parseInt(assessmentId),
+                candidateId: candidateId,
                 scores: finalScores,
-                adjetivos: allSelected
+                respostas: {
+                    passo1: passo1 || [],
+                    passo2: passo2 || [],
+                    passo3: passo3 || []
+                }
             })
         });
 
@@ -597,15 +609,10 @@ app.post('/api/assessment/:assessmentId/submit', async (req: Request, res: Respo
             analise_ia: JSON.stringify(analiseIA)
         });
 
-        const assessmentData = await baserowServer.getRow(AVALIACOES_TABLE_ID, parseInt(assessmentId));
-        if (assessmentData?.candidato?.length > 0) {
-            const candidateId = assessmentData.candidato[0].id;
-            const perfilPrincipal = analiseIA.perfil_principal;
-            if (perfilPrincipal && candidateId) {
-                await baserowServer.patch(CANDIDATOS_TABLE_ID, candidateId, {
-                    perfil_comportamental: perfilPrincipal
-                });
-            }
+        if (analiseIA.perfil_principal && candidateId) {
+            await baserowServer.patch(CANDIDATOS_TABLE_ID, candidateId, {
+                perfil_comportamental: analiseIA.perfil_principal
+            });
         }
 
         await baserowServer.patch(AVALIACOES_TABLE_ID, parseInt(assessmentId), { status: 'Concluído' });
