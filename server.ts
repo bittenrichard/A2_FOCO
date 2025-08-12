@@ -25,6 +25,7 @@ app.use(cors(corsOptions));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// --- CONFIGURAÇÃO DAS IAs ---
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
@@ -32,6 +33,7 @@ const openai = new OpenAI({
 const groq = new Groq({
     apiKey: process.env.GROQ_API_KEY,
 });
+
 
 if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET || !process.env.GOOGLE_REDIRECT_URI) {
   console.error("ERRO CRÍTICO: As credenciais do Google não foram encontradas...");
@@ -75,11 +77,6 @@ interface BaserowCandidate {
   idade?: number | null;
   perfil_comportamental?: string | null;
 }
-
-// ... (todos os outros endpoints de /auth, /users, /jobs, etc. permanecem os mesmos) ...
-// Cole o código completo aqui, vou omitir por brevidade, mas você deve substituir TUDO.
-
-// --- INÍCIO DA SEÇÃO A SER SUBSTITUÍDA ---
 
 app.post('/api/auth/signup', async (req: Request, res: Response) => {
   const { nome, empresa, telefone, email, password } = req.body;
@@ -538,7 +535,7 @@ app.post('/api/google/calendar/create-event', async (req: Request, res: Response
   }
 });
 
-// --- PERFIL COMPORTAMENTAL ---
+// --- NOVA FEATURE: PERFIL COMPORTAMENTAL ---
 
 const adjetivos = [
   'Alegre', 'Animado', 'Anti-Social', 'Arrogante', 'Ativo', 'Bem-Quisto', 'Bom Companheiro', 'Calculista', 'Calmo', 'Compreensivo',
@@ -588,52 +585,6 @@ app.get('/api/assessment/:token', async (req: Request, res: Response) => {
     }
 });
 
-const processarAnaliseIA = async (resultId: number, finalScores: any, allSelected: string[], assessmentId: number) => {
-    const prompt = `
-# INSTRUÇÃO
-Responda APENAS com o objeto JSON solicitado, sem nenhum texto adicional.
-# PERSONA
-Você é um Analista Comportamental Sênior, especialista em DISC.
-# OBJETIVO
-Analisar dados de perfil DISC e gerar um relatório completo.
-# DADOS DE ENTRADA
-- Scores: Executor: ${finalScores.executor}%, Comunicador: ${finalScores.comunicador}%, Planejador: ${finalScores.planejador}%, Analista: ${finalScores.analista}%
-- Adjetivos: ${JSON.stringify(allSelected)}
-# ESTRUTURA DE SAÍDA (JSON OBRIGATÓRIA)
-{
-  "perfil_principal": "...", "perfil_secundario": "...", "resumo_comportamental": "...",
-  "subcaracteristicas": ["..."], "pontos_fortes_contextuais": ["..."], "pontos_de_atencao": ["..."],
-  "indicadores_situacionais": {"exigencia_meio": "...", "aproveitamento": "...", "autoconfianca": "..."}
-}`;
-
-    let analiseIA = null;
-    try {
-        console.log("Tentando chamada para OpenAI...");
-        const completion = await openai.chat.completions.create({ model: 'gpt-4o-mini', messages: [{ role: 'user', content: prompt }], temperature: 0.1, response_format: { type: "json_object" } });
-        analiseIA = completion.choices[0].message.content;
-    } catch (aiError) {
-        console.error("Erro na OpenAI, tentando Groq:", aiError);
-        try {
-            const completion = await groq.chat.completions.create({ messages: [{ role: 'user', content: prompt }], model: 'llama3-8b-8192', temperature: 0.1, response_format: { type: "json_object" } });
-            analiseIA = completion.choices[0].message.content;
-        } catch (groqError) {
-            console.error("Erro no Groq:", groqError);
-        }
-    }
-
-    if (analiseIA) {
-        await baserowServer.patch(RESULTADOS_TABLE_ID, resultId, { analise_ia: analiseIA });
-        const assessmentData = await baserowServer.getRow(AVALIACOES_TABLE_ID, assessmentId);
-        if (assessmentData?.candidato?.length > 0) {
-            const candidateId = assessmentData.candidato[0].id;
-            const perfilPrincipal = JSON.parse(analiseIA).perfil_principal;
-            if (perfilPrincipal && candidateId) {
-                await baserowServer.patch(CANDIDATOS_TABLE_ID, candidateId, { perfil_comportamental: perfilPrincipal });
-            }
-        }
-    }
-};
-
 app.post('/api/assessment/:assessmentId/submit', async (req: Request, res: Response) => {
     const { assessmentId } = req.params;
     const { passo1, passo2, passo3 } = req.body;
@@ -653,18 +604,116 @@ app.post('/api/assessment/:assessmentId/submit', async (req: Request, res: Respo
             planejador: total > 0 ? parseFloat(((scores.P / total) * 100).toFixed(2)) : 0,
             analista: total > 0 ? parseFloat(((scores.A / total) * 100).toFixed(2)) : 0,
         };
+        
+        let analiseIA = null;
+        
+        const prompt = `
+# INSTRUÇÃO
+Responda APENAS com o objeto JSON solicitado, sem nenhum texto adicional, introduções ou explicações.
 
-        const newResult = await baserowServer.post(RESULTADOS_TABLE_ID, {
+# PERSONA
+Você é um Analista Comportamental Sênior, especialista certificado na metodologia DISC, com foco em psicologia organizacional. Sua análise é profunda, contextualizada para o ambiente de trabalho e utiliza uma linguagem positiva e construtiva.
+
+# OBJETIVO
+Analisar os dados de um perfil DISC para gerar um relatório completo, identificando o perfil predominante, subcaracterísticas, pontos fortes, pontos de atenção e indicadores situacionais.
+
+# DADOS DE ENTRADA
+- **Scores Percentuais:**
+    - Executor (Dominância): ${finalScores.executor}%
+    - Comunicador (Influência): ${finalScores.comunicador}%
+    - Planejador (Estabilidade): ${finalScores.planejador}%
+    - Analista (Conformidade): ${finalScores.analista}%
+- **Adjetivos Selecionados:** ${JSON.stringify(allSelected)}
+
+# PROCESSAMENTO
+1.  **Perfis:** Identifique o perfil principal (maior score) e o secundário (segundo maior score).
+2.  **Resumo:** Crie um parágrafo que combine as características do perfil principal e secundário, usando os adjetivos selecionados para dar mais cor e especificidade à descrição.
+3.  **Subcaracterísticas:** Com base no perfil principal, liste de 3 a 5 palavras-chave que definem as qualidades centrais desse perfil (ex: Executor -> Foco em Resultados, Determinação, Competitividade).
+4.  **Indicadores Situacionais:** Avalie três aspectos com base nos scores. Use os níveis "Baixo", "Normal", "Alto" ou "Muito Alto".
+    * **Exigência do Meio:** Quão pressionado o indivíduo se sente. Alto Executor e/ou Analista pode indicar alta auto-cobrança.
+    * **Aproveitamento:** Quão bem o indivíduo utiliza suas habilidades naturais. Scores equilibrados ou um score muito dominante podem indicar alto aproveitamento.
+    * **Autoconfiança:** Nível de segurança em suas ações. Alto Executor e/ou Comunicador geralmente reflete alta autoconfiança.
+
+# ESTRUTURA DE SAÍDA (JSON OBRIGATÓRIA)
+\`\`\`json
+{
+  "perfil_principal": "O nome do perfil com a maior pontuação (Executor, Comunicador, Planejador ou Analista)",
+  "perfil_secundario": "O nome do perfil com a segunda maior pontuação",
+  "resumo_comportamental": "Um parágrafo detalhado que descreve o estilo de trabalho da pessoa, combinando o perfil principal e secundário e usando os adjetivos selecionados.",
+  "subcaracteristicas": [
+    "Palavra-chave 1",
+    "Palavra-chave 2",
+    "Palavra-chave 3"
+  ],
+  "pontos_fortes_contextuais": [
+    "Ponto forte 1, explicado de forma clara e relacionado ao contexto de trabalho.",
+    "Ponto forte 2, explicado de forma clara e relacionado ao contexto de trabalho."
+  ],
+  "pontos_de_atencao": [
+    "Ponto a desenvolver 1, descrito de forma construtiva e prática.",
+    "Ponto a desenvolver 2, descrito de forma construtiva e prática."
+  ],
+  "indicadores_situacionais": {
+      "exigencia_meio": "O nível avaliado (Baixo, Normal, Alto, Muito Alto)",
+      "aproveitamento": "O nível avaliado (Baixo, Normal, Alto, Muito Alto)",
+      "autoconfianca": "O nível avaliado (Baixo, Normal, Alto, Muito Alto)"
+  }
+}
+\`\`\`
+`;
+        try {
+            console.log("Tentando chamada para OpenAI...");
+            const completion = await openai.chat.completions.create({ model: 'gpt-4o-mini', messages: [{ role: 'user', content: prompt }], temperature: 0.1, response_format: { type: "json_object" } });
+            if (completion.choices[0].message.content) {
+                analiseIA = completion.choices[0].message.content;
+            }
+        } catch (aiError) {
+            console.error("Erro na chamada para a OpenAI, tentando fallback para Groq:", aiError);
+            try {
+                console.log("Tentando chamada para Groq...");
+                const completion = await groq.chat.completions.create({
+                    messages: [{ role: 'user', content: prompt }],
+                    model: 'llama3-8b-8192',
+                    temperature: 0.1,
+                    response_format: { type: "json_object" }
+                });
+                if (completion.choices[0].message.content) {
+                    analiseIA = completion.choices[0].message.content;
+                }
+            } catch (groqError) {
+                console.error("Erro na chamada para o Groq:", groqError);
+            }
+        }
+        
+        await baserowServer.post(RESULTADOS_TABLE_ID, {
             avaliacao: [parseInt(assessmentId)], ...finalScores,
             respostas_passo1: JSON.stringify(passo1), respostas_passo2: JSON.stringify(passo2), respostas_passo3: JSON.stringify(passo3),
+            analise_ia: analiseIA
         });
 
+        const assessmentData = await baserowServer.getRow(AVALIACOES_TABLE_ID, parseInt(assessmentId));
+        if (assessmentData && assessmentData.candidato && assessmentData.candidato.length > 0) {
+            const candidateId = assessmentData.candidato[0].id;
+            let perfilPrincipal = null;
+            if (analiseIA) {
+                try {
+                    const parsedAnalise = JSON.parse(analiseIA);
+                    perfilPrincipal = parsedAnalise.perfil_principal;
+                } catch (e) {
+                    console.error("Não foi possível parsear a análise da IA para extrair o perfil principal.");
+                }
+            }
+            if (perfilPrincipal && candidateId) {
+                console.log(`Atualizando candidato ${candidateId} com perfil: ${perfilPrincipal}`);
+                await baserowServer.patch(CANDIDATOS_TABLE_ID, candidateId, {
+                    perfil_comportamental: perfilPrincipal
+                });
+            }
+        }
+
         await baserowServer.patch(AVALIACOES_TABLE_ID, parseInt(assessmentId), { status: 'Concluído' });
-
-        res.status(200).json({ success: true, message: "Avaliação recebida! A análise está sendo processada." });
-
-        // Processa a IA de forma assíncrona
-        processarAnaliseIA(newResult.id, finalScores, allSelected, parseInt(assessmentId));
+        
+        res.status(200).json({ success: true, message: "Avaliação concluída com sucesso!" });
 
     } catch (error) {
         console.error("Erro ao submeter avaliação (falha ao salvar no banco):", error);
@@ -683,6 +732,7 @@ app.get('/api/assessment/result/:assessmentId', async (req: Request, res: Respon
                 try {
                     profileData.analise_ia = JSON.parse(profileData.analise_ia);
                 } catch (e) {
+                    console.error("Erro ao fazer parse da análise da IA no backend, enviando como null:", e);
                     profileData.analise_ia = null;
                 }
             }
