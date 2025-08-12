@@ -25,6 +25,7 @@ app.use(cors(corsOptions));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// --- CONFIGURAÇÃO DAS IAs ---
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
@@ -32,6 +33,7 @@ const openai = new OpenAI({
 const groq = new Groq({
     apiKey: process.env.GROQ_API_KEY,
 });
+
 
 if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET || !process.env.GOOGLE_REDIRECT_URI) {
   console.error("ERRO CRÍTICO: As credenciais do Google não foram encontradas...");
@@ -654,6 +656,7 @@ app.post('/api/assessment/:assessmentId/submit', async (req: Request, res: Respo
 
         res.status(200).json({ success: true, message: "Avaliação recebida! A análise está sendo processada." });
 
+        // A chamada da IA agora acontece em segundo plano, sem bloquear a resposta.
         processarAnaliseIA(newResult.id, finalScores, allSelected, parseInt(assessmentId));
 
     } catch (error) {
