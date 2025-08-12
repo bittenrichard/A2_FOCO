@@ -768,4 +768,3 @@ app.get('/api/candidates/:candidateId/behavioral-profile', async (req: Request, 
 app.listen(port, () => {
   console.log(`Backend rodando em http://localhost:${port}`);
 });
-}
