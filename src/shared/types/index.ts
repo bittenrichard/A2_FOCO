@@ -1,9 +1,7 @@
 // Local: src/shared/types/index.ts
 
-// Chave da página para navegação - ADICIONAMOS 'edit-screening'
 export type PageKey = 'login' | 'signup' | 'dashboard' | 'new-screening' | 'edit-screening' | 'results' | 'settings' | 'database' | 'agenda';
 
-// Representa um Candidato como vem da API do Baserow
 export interface Candidate {
   id: number;
   order: string;
@@ -23,4 +21,7 @@ export interface Candidate {
   sexo?: string;
   escolaridade?: string;
   status?: { id: number; value: 'Triagem' | 'Entrevista' | 'Aprovado' | 'Reprovado' } | null;
+  
+  // --- CAMPO ADICIONADO ---
+  perfil_comportamental?: string | null;
 }

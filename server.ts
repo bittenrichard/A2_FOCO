@@ -76,6 +76,7 @@ interface BaserowCandidate {
   sexo?: string | null;
   escolaridade?: string | null;
   idade?: number | null;
+  perfil_comportamental?: string | null; // <-- CAMPO ADICIONADO
 }
 
 app.post('/api/auth/signup', async (req: Request, res: Response) => {
@@ -545,7 +546,7 @@ const adjetivos = [
   'Crítico', 'Desmotivado', 'Desorganizado', 'Destacado', 'Discreto', 'Eficiente', 'Equilibrado', 'Espalhafatoso', 'Estimulante', 'Exagerado', 'Exigente',
   'Idealista', 'Impaciente', 'Indeciso', 'Independente', 'Indisciplinado', 'Intolerante', 'Introvertido', 'Leal', 'Líder', 'Medroso',
   'Minucioso', 'Modesto', 'Orgulhoso', 'Otimista', 'Paciente', 'Perfeccionista', 'Persistente', 'Pessimista', 'Popular', 'Prático',
-  'Pretensioso', 'Procrastinador', 'Racional', 'Reservado', 'Resoluto (Decidido)', 'Rotineiro', 'Sarcástico', 'Sensível', 'Sentimental', 'Simpático',
+  'Pretensioso', 'Procrastinator', 'Racional', 'Reservado', 'Resoluto (Decidido)', 'Rotineiro', 'Sarcástico', 'Sensível', 'Sentimental', 'Simpático',
   'Sincero', 'Temeroso', 'Teórico', 'Tranquilo', 'Vaidoso', 'Vingativo'
 ];
 const perfilMap: { [key: string]: string } = {
@@ -666,20 +667,44 @@ Analisar os dados de um perfil DISC para gerar um resumo coeso e prático, ident
             }
         }
         
-        // Se a análise da IA falhou, `analiseIA` será null. O campo no Baserow ficará vazio.
         await baserowServer.post(RESULTADOS_TABLE_ID, {
             avaliacao: [parseInt(assessmentId)], ...finalScores,
             respostas_passo1: JSON.stringify(passo1), respostas_passo2: JSON.stringify(passo2), respostas_passo3: JSON.stringify(passo3),
-            analise_ia: analiseIA // Salva o JSON como string ou null
+            analise_ia: analiseIA
         });
 
-        // Marca a avaliação como concluída independentemente do sucesso da IA
+        // <-- INÍCIO DA NOVA LÓGICA -->
+        // 1. Descobrir qual candidato está associado a esta avaliação
+        const assessmentData = await baserowServer.getRow(AVALIACOES_TABLE_ID, parseInt(assessmentId));
+        if (assessmentData && assessmentData.candidato && assessmentData.candidato.length > 0) {
+            const candidateId = assessmentData.candidato[0].id;
+            
+            // 2. Determinar o perfil principal a partir da análise da IA
+            let perfilPrincipal = null;
+            if (analiseIA) {
+                try {
+                    const parsedAnalise = JSON.parse(analiseIA);
+                    perfilPrincipal = parsedAnalise.perfil_principal;
+                } catch (e) {
+                    console.error("Não foi possível parsear a análise da IA para extrair o perfil principal.");
+                }
+            }
+
+            // 3. Se tivermos um perfil principal, atualiza a tabela de Candidatos
+            if (perfilPrincipal && candidateId) {
+                console.log(`Atualizando candidato ${candidateId} com perfil: ${perfilPrincipal}`);
+                await baserowServer.patch(CANDIDATOS_TABLE_ID, candidateId, {
+                    perfil_comportamental: perfilPrincipal
+                });
+            }
+        }
+        // <-- FIM DA NOVA LÓGICA -->
+
         await baserowServer.patch(AVALIACOES_TABLE_ID, parseInt(assessmentId), { status: 'Concluído' });
         
         res.status(200).json({ success: true, message: "Avaliação concluída com sucesso!" });
 
     } catch (error) {
-        // Este erro agora só deve acontecer se o Baserow falhar.
         console.error("Erro ao submeter avaliação (falha ao salvar no banco):", error);
         res.status(500).json({ error: 'Não foi possível processar sua avaliação.' });
     }
@@ -691,7 +716,6 @@ app.get('/api/assessment/result/:assessmentId', async (req: Request, res: Respon
         const { results } = await baserowServer.get(RESULTADOS_TABLE_ID, `?filter__avaliacao__link_row_has=${assessmentId}`);
         if (results && results.length > 0) {
             const profileData = results[0];
-            // O campo 'analise_ia' pode ser nulo ou uma string JSON. O frontend irá tratar isso.
             res.json({ success: true, result: profileData });
         } else {
             res.status(404).json({ error: "Resultado da avaliação não encontrado." });
