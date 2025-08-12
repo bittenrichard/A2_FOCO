@@ -1,6 +1,6 @@
 // Local: src/features/assessment/AssessmentResultPage.tsx
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 import { Loader2, BrainCircuit, Star, Zap, ShieldAlert, CheckCircle, TrendingUp, TrendingDown, Users, CheckSquare, Target } from 'lucide-react';
 
@@ -53,7 +53,9 @@ const AssessmentResultPage: React.FC = () => {
     const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
     const fetchResult = useCallback(async () => {
+        // Mostra o loading grande apenas na primeira vez
         if (!result) setIsLoading(true);
+
         try {
             const response = await fetch(`${API_BASE_URL}/api/assessment/result/${assessmentId}`);
             if (!response.ok) {
@@ -62,6 +64,8 @@ const AssessmentResultPage: React.FC = () => {
             }
             const data = await response.json();
             setResult(data.result);
+            
+            // Se já temos a análise da IA, paramos de buscar
             if (data.result?.analise_ia) {
                 if (intervalRef.current) clearInterval(intervalRef.current);
             }
@@ -75,9 +79,17 @@ const AssessmentResultPage: React.FC = () => {
     }, [assessmentId, result]);
 
     useEffect(() => {
-        fetchResult();
+        fetchResult(); // Busca a primeira vez
+        
+        // Configura o polling
         intervalRef.current = setInterval(fetchResult, 5000);
-        return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
+        
+        // Limpa o intervalo quando o componente é desmontado
+        return () => {
+            if (intervalRef.current) {
+                clearInterval(intervalRef.current);
+            }
+        };
     }, [fetchResult]);
 
     if (isLoading && !result) {
