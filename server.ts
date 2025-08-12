@@ -11,7 +11,7 @@ import fetch from 'node-fetch';
 import bcrypt from 'bcryptjs';
 import multer from 'multer';
 import OpenAI from 'openai';
-import Groq from 'groq-sdk'; // Importação da nova biblioteca Groq
+import Groq from 'groq-sdk';
 
 const app = express();
 const port = 3001;
@@ -531,8 +531,7 @@ app.post('/api/assessment/:assessmentId/submit', async (req: Request, res: Respo
         };
         
         let analiseIA = JSON.stringify({ error: "Falha ao gerar análise da IA." });
-        try {
-            const prompt = `
+        const prompt = `
 # PERSONA
 Você é um Analista Comportamental Sênior, especialista certificado na metodologia DISC. Sua comunicação é clara, objetiva e sempre construtiva. Sua análise vai além dos rótulos, focando em como os traços se manifestam no ambiente de trabalho.
 # OBJETIVO
@@ -576,10 +575,22 @@ Sua resposta final deve ser **APENAS** o objeto JSON abaixo, sem textos ou expli
 }
 \`\`\`
 `;
+        try {
             const completion = await openai.chat.completions.create({ model: 'gpt-4o-mini', messages: [{ role: 'user', content: prompt }], temperature: 0.0, response_format: { type: "json_object" } });
             analiseIA = completion.choices[0].message.content || analiseIA;
         } catch (aiError) {
-            console.error("Erro na chamada para a OpenAI:", aiError);
+            console.error("Erro na chamada para a OpenAI, tentando fallback para Groq:", aiError);
+            try {
+                const completion = await groq.chat.completions.create({
+                    messages: [{ role: 'user', content: prompt }],
+                    model: 'llama3-8b-8192',
+                    temperature: 0.0,
+                    response_format: { type: "json_object" }
+                });
+                analiseIA = completion.choices[0].message.content || analiseIA;
+            } catch (groqError) {
+                console.error("Erro na chamada para o Groq:", groqError);
+            }
         }
         
         await baserowServer.post(RESULTADOS_TABLE_ID, {
