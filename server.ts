@@ -7,9 +7,11 @@ import express, { Request, Response } from 'express';
 import cors from 'cors';
 import { google } from 'googleapis';
 import { baserowServer } from './src/shared/services/baserowServerClient.js';
+import fetch from 'node-fetch';
 import bcrypt from 'bcryptjs';
 import multer from 'multer';
-import fetch from 'node-fetch';
+import OpenAI from 'openai';
+import Groq from 'groq-sdk';
 
 const app = express();
 const port = 3001;
@@ -23,6 +25,15 @@ app.use(cors(corsOptions));
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// --- CONFIGURAÇÃO DAS IAs ---
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
+const groq = new Groq({
+    apiKey: process.env.GROQ_API_KEY,
+});
+
 
 if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET || !process.env.GOOGLE_REDIRECT_URI) {
   console.error("ERRO CRÍTICO: As credenciais do Google não foram encontradas...");
@@ -40,44 +51,50 @@ const VAGAS_TABLE_ID = '709';
 const CANDIDATOS_TABLE_ID = '710';
 const WHATSAPP_CANDIDATOS_TABLE_ID = '712';
 const AGENDAMENTOS_TABLE_ID = '713';
-const AVALIACOES_TABLE_ID = '727';
-const RESULTADOS_TABLE_ID = '728';
+const ASSESSMENT_TABLE_ID = '727'; // Tabela única para todo o processo
 const SALT_ROUNDS = 10;
+
+interface BaserowJobPosting {
+  id: number;
+  titulo: string;
+  usuario?: { id: number; value: string }[];
+}
+
+interface BaserowCandidate {
+  id: number;
+  vaga?: { id: number; value: string }[] | string | null;
+  usuario?: { id: number; value: string }[] | null;
+  nome: string;
+  telefone: string | null;
+  curriculo?: { url: string; name: string }[] | null;
+  score?: number | null;
+  resumo_ia?: string | null;
+  status?: { id: number; value: 'Triagem' | 'Entrevista' | 'Aprovado' | 'Reprovado' } | null;
+  data_triagem?: string;
+  sexo?: string | null;
+  escolaridade?: string | null;
+  idade?: number | null;
+}
 
 app.post('/api/auth/signup', async (req: Request, res: Response) => {
   const { nome, empresa, telefone, email, password } = req.body;
   if (!email || !password || !nome) {
     return res.status(400).json({ error: 'Nome, email e senha são obrigatórios.' });
   }
-
   try {
     const emailLowerCase = email.toLowerCase();
     const { results: existingUsers } = await baserowServer.get(USERS_TABLE_ID, `?filter__Email__equal=${emailLowerCase}`);
-
     if (existingUsers && existingUsers.length > 0) {
       return res.status(409).json({ error: 'Este e-mail já está cadastrado.' });
     }
-
     const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS);
-
     const newUser = await baserowServer.post(USERS_TABLE_ID, {
-      nome,
-      empresa,
-      telefone,
-      Email: emailLowerCase,
-      senha_hash: hashedPassword,
+      nome, empresa, telefone, Email: emailLowerCase, senha_hash: hashedPassword,
     });
-
     const userProfile = {
-      id: newUser.id,
-      nome: newUser.nome,
-      email: newUser.Email,
-      empresa: newUser.empresa,
-      telefone: newUser.telefone,
-      avatar_url: newUser.avatar_url || null,
-      google_refresh_token: newUser.google_refresh_token || null,
+      id: newUser.id, nome: newUser.nome, email: newUser.Email, empresa: newUser.empresa, telefone: newUser.telefone,
+      avatar_url: newUser.avatar_url || null, google_refresh_token: newUser.google_refresh_token || null,
     };
-
     res.status(201).json({ success: true, user: userProfile });
   } catch (error: any) {
     console.error('Erro no registro (backend):', error);
@@ -90,27 +107,18 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
   if (!email || !password) {
     return res.status(400).json({ error: 'Email e senha são obrigatórios.' });
   }
-
   try {
     const emailLowerCase = email.toLowerCase();
     const { results: users } = await baserowServer.get(USERS_TABLE_ID, `?filter__Email__equal=${emailLowerCase}`);
     const user = users && users[0];
-
     if (!user || !user.senha_hash) {
       return res.status(401).json({ error: 'E-mail ou senha inválidos.' });
     }
-
     const passwordMatches = await bcrypt.compare(password, user.senha_hash);
-
     if (passwordMatches) {
       const userProfile = {
-        id: user.id,
-        nome: user.nome,
-        email: user.Email,
-        empresa: user.empresa,
-        telefone: user.telefone,
-        avatar_url: user.avatar_url || null,
-        google_refresh_token: user.google_refresh_token || null,
+        id: user.id, nome: user.nome, email: user.Email, empresa: user.empresa, telefone: user.telefone,
+        avatar_url: user.avatar_url || null, google_refresh_token: user.google_refresh_token || null,
       };
       res.json({ success: true, user: userProfile });
     } else {
@@ -125,33 +133,22 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
 app.patch('/api/users/:userId/profile', async (req: Request, res: Response) => {
   const { userId } = req.params;
   const { nome, empresa, avatar_url } = req.body;
-
   if (!userId) {
     return res.status(400).json({ error: 'ID do usuário é obrigatório.' });
   }
-
   try {
     const updatedData: Record<string, any> = {};
     if (nome !== undefined) updatedData.nome = nome;
     if (empresa !== undefined) updatedData.empresa = empresa;
     if (avatar_url !== undefined) updatedData.avatar_url = avatar_url;
-
     if (Object.keys(updatedData).length === 0) {
       return res.status(400).json({ error: 'Nenhum dado para atualizar.' });
     }
-
     const updatedUser = await baserowServer.patch(USERS_TABLE_ID, parseInt(userId), updatedData);
-
     const userProfile = {
-      id: updatedUser.id,
-      nome: updatedUser.nome,
-      email: updatedUser.Email,
-      empresa: updatedUser.empresa,
-      telefone: updatedUser.telefone,
-      avatar_url: updatedUser.avatar_url || null,
-      google_refresh_token: updatedUser.google_refresh_token || null,
+      id: updatedUser.id, nome: updatedUser.nome, email: updatedUser.Email, empresa: updatedUser.empresa, telefone: updatedUser.telefone,
+      avatar_url: updatedUser.avatar_url || null, google_refresh_token: updatedUser.google_refresh_token || null,
     };
-
     res.status(200).json({ success: true, user: userProfile });
   } catch (error: any) {
     console.error('Erro ao atualizar perfil (backend):', error);
@@ -162,14 +159,12 @@ app.patch('/api/users/:userId/profile', async (req: Request, res: Response) => {
 app.patch('/api/users/:userId/password', async (req: Request, res: Response) => {
   const { userId } = req.params;
   const { password } = req.body;
-
   if (!userId || !password) {
     return res.status(400).json({ error: 'ID do usuário e nova senha são obrigatórios.' });
   }
   if (password.length < 6) {
     return res.status(400).json({ error: 'A senha deve ter no mínimo 6 caracteres.' });
   }
-
   try {
     const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS);
     await baserowServer.patch(USERS_TABLE_ID, parseInt(userId), { senha_hash: hashedPassword });
@@ -191,13 +186,8 @@ app.get('/api/users/:userId', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Usuário não encontrado.' });
     }
     const userProfile = {
-      id: user.id,
-      nome: user.nome,
-      email: user.Email,
-      empresa: user.empresa,
-      telefone: user.telefone,
-      avatar_url: user.avatar_url || null,
-      google_refresh_token: user.google_refresh_token || null,
+      id: user.id, nome: user.nome, email: user.Email, empresa: user.empresa, telefone: user.telefone,
+      avatar_url: user.avatar_url || null, google_refresh_token: user.google_refresh_token || null,
     };
     res.json(userProfile);
   } catch (error: any) {
@@ -211,28 +201,18 @@ app.post('/api/upload-avatar', upload.single('avatar'), async (req: Request, res
   if (!userId || !req.file) {
     return res.status(400).json({ error: 'Arquivo e ID do usuário são obrigatórios.' });
   }
-
   try {
     const fileBuffer = req.file.buffer;
     const fileName = req.file.originalname;
     const mimetype = req.file.mimetype;
-
     const uploadedFile = await baserowServer.uploadFileFromBuffer(fileBuffer, fileName, mimetype);
     const newAvatarUrl = uploadedFile.url;
-
     const updatedUser = await baserowServer.patch(USERS_TABLE_ID, parseInt(userId), { avatar_url: newAvatarUrl });
-
     const userProfile = {
-      id: updatedUser.id,
-      nome: updatedUser.nome,
-      email: updatedUser.Email,
-      empresa: updatedUser.empresa,
-      telefone: updatedUser.telefone,
-      avatar_url: updatedUser.avatar_url || null,
-      google_refresh_token: updatedUser.google_refresh_token || null,
+      id: updatedUser.id, nome: updatedUser.nome, email: updatedUser.Email, empresa: updatedUser.empresa,
+      telefone: updatedUser.telefone, avatar_url: updatedUser.avatar_url || null, google_refresh_token: updatedUser.google_refresh_token || null,
     };
     res.json({ success: true, avatar_url: newAvatarUrl, user: userProfile });
-
   } catch (error: any) {
     console.error('Erro ao fazer upload de avatar (backend):', error);
     res.status(500).json({ error: error.message || 'Não foi possível fazer upload do avatar.' });
@@ -241,18 +221,12 @@ app.post('/api/upload-avatar', upload.single('avatar'), async (req: Request, res
 
 app.post('/api/jobs', async (req: Request, res: Response) => {
   const { titulo, descricao, endereco, requisitos_obrigatorios, requisitos_desejaveis, usuario } = req.body;
-  if (!titulo || !descricao || !usuario || usuario.length === 0) {
+  if (!titulo || !descricao || !usuario || !usuario.length) {
     return res.status(400).json({ error: 'Título, descrição e ID do usuário são obrigatórios.' });
   }
-
   try {
     const createdJob = await baserowServer.post(VAGAS_TABLE_ID, {
-      titulo,
-      descricao,
-      Endereco: endereco,
-      requisitos_obrigatorios,
-      requisitos_desejaveis,
-      usuario,
+      titulo, descricao, Endereco: endereco, requisitos_obrigatorios, requisitos_desejaveis, usuario,
     });
     res.status(201).json(createdJob);
   } catch (error: any) {
@@ -267,7 +241,6 @@ app.patch('/api/jobs/:jobId', async (req: Request, res: Response) => {
   if (!jobId || Object.keys(updatedData).length === 0) {
     return res.status(400).json({ error: 'ID da vaga e dados para atualização são obrigatórios.' });
   }
-
   try {
     const updatedJob = await baserowServer.patch(VAGAS_TABLE_ID, parseInt(jobId), updatedData);
     res.json(updatedJob);
@@ -282,7 +255,6 @@ app.delete('/api/jobs/:jobId', async (req: Request, res: Response) => {
   if (!jobId) {
     return res.status(400).json({ error: 'ID da vaga é obrigatório.' });
   }
-
   try {
     await baserowServer.delete(VAGAS_TABLE_ID, parseInt(jobId));
     res.status(204).send();
@@ -295,16 +267,13 @@ app.delete('/api/jobs/:jobId', async (req: Request, res: Response) => {
 app.patch('/api/candidates/:candidateId/status', async (req: Request, res: Response) => {
   const { candidateId } = req.params;
   const { status } = req.body;
-
   if (!candidateId || !status) {
     return res.status(400).json({ error: 'ID do candidato e status são obrigatórios.' });
   }
-
   const validStatuses = ['Triagem', 'Entrevista', 'Aprovado', 'Reprovado'];
   if (!validStatuses.includes(status)) {
     return res.status(400).json({ error: 'Status inválido fornecido.' });
   }
-
   try {
     const updatedCandidate = await baserowServer.patch(CANDIDATOS_TABLE_ID, parseInt(candidateId), { status: status });
     res.json(updatedCandidate);
@@ -319,28 +288,23 @@ app.get('/api/data/all/:userId', async (req: Request, res: Response) => {
   if (!userId) {
     return res.status(400).json({ error: 'ID do usuário é obrigatório.' });
   }
-
   try {
     const jobsResult = await baserowServer.get(VAGAS_TABLE_ID, '');
-    const allJobs: any[] = (jobsResult.results || []);
+    const allJobs: BaserowJobPosting[] = (jobsResult.results || []) as BaserowJobPosting[];
     const userJobs = allJobs.filter((job) =>
-      job.usuario && job.usuario.some((user: any) => user.id === parseInt(userId))
+      job.usuario && job.usuario.some((user) => user.id === parseInt(userId))
     );
-
     const userJobIds = new Set(userJobs.map(job => job.id));
-    const jobsMapByTitle = new Map<string, any>(userJobs.map(job => [job.titulo.toLowerCase().trim(), job]));
-    const jobsMapById = new Map<number, any>(userJobs.map(job => [job.id, job]));
-
+    const jobsMapByTitle = new Map<string, BaserowJobPosting>(userJobs.map(job => [job.titulo.toLowerCase().trim(), job]));
+    const jobsMapById = new Map<number, BaserowJobPosting>(userJobs.map(job => [job.id, job]));
     const regularCandidatesResult = await baserowServer.get(CANDIDATOS_TABLE_ID, '');
     const whatsappCandidatesResult = await baserowServer.get(WHATSAPP_CANDIDATOS_TABLE_ID, '');
-
-    const allCandidatesRaw: any[] = [
+    const allCandidatesRaw: BaserowCandidate[] = [
       ...(regularCandidatesResult.results || []),
       ...(whatsappCandidatesResult.results || [])
-    ];
-
+    ] as BaserowCandidate[];
     const userCandidatesRaw = allCandidatesRaw.filter((candidate) => {
-      if (candidate.usuario && candidate.usuario.some((u: any) => u.id === parseInt(userId))) {
+      if (candidate.usuario && candidate.usuario.some((u) => u.id === parseInt(userId))) {
         return true;
       }
       if (typeof candidate.vaga === 'string' && candidate.vaga) {
@@ -353,7 +317,6 @@ app.get('/api/data/all/:userId', async (req: Request, res: Response) => {
       }
       return false;
     });
-
     const syncedCandidates = userCandidatesRaw.map((candidate) => {
       const newCandidate = { ...candidate };
       let vagaLink: { id: number; value: string }[] | null = null;
@@ -370,9 +333,7 @@ app.get('/api/data/all/:userId', async (req: Request, res: Response) => {
       }
       return { ...newCandidate, vaga: vagaLink };
     });
-
     res.json({ jobs: userJobs, candidates: syncedCandidates });
-
   } catch (error: any) {
     console.error('Erro ao buscar todos os dados (backend):', error);
     res.status(500).json({ error: 'Falha ao carregar dados.' });
@@ -495,17 +456,31 @@ app.post('/api/google/calendar/create-event', async (req: Request, res: Response
       'Detalhes': eventData.details, 'Candidato': [candidate.id], 'Vaga': [job.id], 'google_event_link': response.data.htmlLink
     });
     res.json({ success: true, message: 'Evento criado com sucesso!', data: response.data });
-  } catch (error: any) {
+  } catch (error) {
     console.error('Erro ao criar evento no Google Calendar:', error);
     res.status(500).json({ success: false, message: 'Falha ao criar evento.' });
   }
 });
 
-// --- PERFIL COMPORTAMENTAL ---
+// --- NOVA FEATURE: PERFIL COMPORTAMENTAL ---
 
 const adjetivos = [
-  'Alegre', 'Animado', 'Anti-Social', 'Arrogante', 'Ativo', 'Bem-Quisto', 'Bom Companheiro', 'Calculista', 'Calmo', 'Compreensivo', 'Cumpridor', 'Decidido', 'Dedicado', 'Depressivo', 'Desconfiado', 'Egocêntrico', 'Egoísta', 'Empolgante', 'Enérgico', 'Entusiasta', 'Estrovertido', 'Exuberante', 'Firme', 'Frio', 'Habilidoso', 'Inflexível', 'Influenciador', 'Ingênuo', 'Inseguro', 'Insensível', 'Audacioso (Ousado)', 'Auto-Disciplinado', 'Auto-Suficiente', 'Barulhento', 'Bem-Humorado', 'Comunicativo', 'Conservador', 'Contagiante', 'Corajoso', 'Crítico', 'Desmotivado', 'Desorganizado', 'Destacado', 'Discreto', 'Eficiente', 'Equilibrado', 'Espalhafatoso', 'Estimulante', 'Exagerado', 'Exigente', 'Idealista', 'Impaciente', 'Indeciso', 'Independente', 'Indisciplinado', 'Intolerante', 'Introvertido', 'Leal', 'Líder', 'Medroso', 'Minucioso', 'Modesto', 'Orgulhoso', 'Otimista', 'Paciente', 'Perfeccionista', 'Persistente', 'Pessimista', 'Popular', 'Prático', 'Pretensioso', 'Procrastinator', 'Racional', 'Reservado', 'Resoluto (Decidido)', 'Rotineiro', 'Sarcástico', 'Sensível', 'Sentimental', 'Simpático', 'Sincero', 'Temeroso', 'Teórico', 'Tranquilo', 'Vaidoso', 'Vingativo'
+  'Alegre', 'Animado', 'Anti-Social', 'Arrogante', 'Ativo', 'Bem-Quisto', 'Bom Companheiro', 'Calculista', 'Calmo', 'Compreensivo',
+  'Cumpridor', 'Decidido', 'Dedicado', 'Depressivo', 'Desconfiado', 'Egocêntrico', 'Egoísta', 'Empolgante', 'Enérgico', 'Entusiasta',
+  'Estrovertido', 'Exuberante', 'Firme', 'Frio', 'Habilidoso', 'Inflexível', 'Influenciador', 'Ingênuo', 'Inseguro', 'Insensível',
+  'Audacioso (Ousado)', 'Auto-Disciplinado', 'Auto-Suficiente', 'Barulhento', 'Bem-Humorado', 'Comunicativo', 'Conservador', 'Contagiante', 'Corajoso',
+  'Crítico', 'Desmotivado', 'Desorganizado', 'Destacado', 'Discreto', 'Eficiente', 'Equilibrado', 'Espalhafatoso', 'Estimulante', 'Exagerado', 'Exigente',
+  'Idealista', 'Impaciente', 'Indeciso', 'Independente', 'Indisciplinado', 'Intolerante', 'Introvertido', 'Leal', 'Líder', 'Medroso',
+  'Minucioso', 'Modesto', 'Orgulhoso', 'Otimista', 'Paciente', 'Perfeccionista', 'Persistente', 'Pessimista', 'Popular', 'Prático',
+  'Pretensioso', 'Procrastinador', 'Racional', 'Reservado', 'Resoluto (Decidido)', 'Rotineiro', 'Sarcástico', 'Sensível', 'Sentimental', 'Simpático',
+  'Sincero', 'Temeroso', 'Teórico', 'Tranquilo', 'Vaidoso', 'Vingativo'
 ];
+const perfilMap: { [key: string]: string } = {
+    'Audacioso (Ousado)': 'E', 'Líder': 'E', 'Exigente': 'E', 'Decidido': 'E', 'Independente': 'E', 'Corajoso': 'E', 'Firme': 'E', 'Ativo': 'E', 'Enérgico': 'E',
+    'Comunicativo': 'C', 'Popular': 'C', 'Entusiasta': 'C', 'Otimista': 'C', 'Contagiante': 'C', 'Influenciador': 'C', 'Alegre': 'C', 'Animado': 'C', 'Simpático': 'C',
+    'Calmo': 'P', 'Paciente': 'P', 'Leal': 'P', 'Tranquilo': 'P', 'Conservador': 'P', 'Dedicado': 'P', 'Compreensivo': 'P', 'Bom Companheiro': 'P', 'Modesto': 'P',
+    'Perfeccionista': 'A', 'Minucioso': 'A', 'Racional': 'A', 'Calculista': 'A', 'Crítico': 'A', 'Prático': 'A', 'Auto-Disciplinado': 'A', 'Eficiente': 'A', 'Cumpridor': 'A'
+};
 
 app.post('/api/candidates/:candidateId/create-assessment', async (req: Request, res: Response) => {
     const { candidateId } = req.params;
@@ -513,11 +488,11 @@ app.post('/api/candidates/:candidateId/create-assessment', async (req: Request, 
         const token = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
         const expiraEm = new Date();
         expiraEm.setDate(expiraEm.getDate() + 30);
-        const newAssessment = await baserowServer.post(AVALIACOES_TABLE_ID, {
+        await baserowServer.post(AVALIACOES_TABLE_ID, {
             candidato: [parseInt(candidateId)], token: token, status: 'Pendente', expira_em: expiraEm.toISOString().split('T')[0]
         });
         const assessmentLink = `https://recrutamentoia.com.br/assessment/${token}`;
-        res.status(201).json({ success: true, link: assessmentLink, assessmentId: newAssessment.id });
+        res.status(201).json({ success: true, link: assessmentLink });
     } catch (error: any) {
         res.status(500).json({ error: 'Não foi possível criar o link da avaliação.' });
     }
@@ -540,50 +515,94 @@ app.get('/api/assessment/:token', async (req: Request, res: Response) => {
 app.post('/api/assessment/:assessmentId/submit', async (req: Request, res: Response) => {
     const { assessmentId } = req.params;
     const { passo1, passo2, passo3 } = req.body;
-
-    const n8nWebhookUrl = process.env.N8N_ASSESSMENT_WEBHOOK_URL;
-    if (!n8nWebhookUrl) {
-        console.error("ERRO GRAVE: A variável de ambiente N8N_ASSESSMENT_WEBHOOK_URL não está configurada.");
-        return res.status(500).json({ error: 'Integração com o sistema de análise não configurada.' });
-    }
-
     try {
-        // Busca os dados da avaliação para obter o ID do candidato
-        const assessmentData = await baserowServer.getRow(AVALIACOES_TABLE_ID, parseInt(assessmentId));
-        if (!assessmentData?.candidato?.length) {
-            throw new Error(`Nenhum candidato encontrado para a avaliação ID: ${assessmentId}`);
-        }
-        const candidateId = assessmentData.candidato[0].id;
-        
-        console.log(`Enviando dados para o webhook do n8n: ${n8nWebhookUrl}`);
-        const n8nResponse = await fetch(n8nWebhookUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                assessmentId: parseInt(assessmentId),
-                candidateId: candidateId,
-                respostas: {
-                    passo1: passo1 || [],
-                    passo2: passo2 || [],
-                    passo3: passo3 || []
-                }
-            })
+        const scores: { [key: string]: number } = { E: 0, C: 0, P: 0, A: 0 };
+        const allSelected = [...(passo1 || []), ...(passo2 || []), ...(passo3 || [])];
+        allSelected.forEach(adjetivo => {
+            const perfil = perfilMap[adjetivo];
+            if (perfil) { scores[perfil] = (scores[perfil] || 0) + 1; }
         });
-
-        if (!n8nResponse.ok) {
-            const errorBody = await n8nResponse.text();
-            console.error("Erro na resposta do n8n:", errorBody);
-            throw new Error(`O webhook do n8n respondeu com o status: ${n8nResponse.status}`);
+        const total = Object.values(scores).reduce((sum, val) => sum + val, 0);
+        const finalScores = {
+            executor: total > 0 ? parseFloat(((scores.E / total) * 100).toFixed(2)) : 0,
+            comunicador: total > 0 ? parseFloat(((scores.C / total) * 100).toFixed(2)) : 0,
+            planejador: total > 0 ? parseFloat(((scores.P / total) * 100).toFixed(2)) : 0,
+            analista: total > 0 ? parseFloat(((scores.A / total) * 100).toFixed(2)) : 0,
+        };
+        
+        const prompt = `
+# PERSONA
+Você é um Analista Comportamental Sênior, especialista certificado na metodologia DISC. Sua comunicação é clara, objetiva e sempre construtiva. Sua análise vai além dos rótulos, focando em como os traços se manifestam no ambiente de trabalho.
+# OBJETIVO
+Analisar os dados de um perfil DISC para gerar um resumo coeso e prático, identificando o perfil predominante, os pontos fortes e os pontos de atenção, considerando o contexto de uma vaga ou do desenvolvimento profissional.
+# DADOS DE ENTRADA
+- **Contexto da Análise:** "Análise de perfil para desenvolvimento profissional e adequação geral a um ambiente de trabalho corporativo."
+- **Scores Percentuais:**
+    - Executor (Dominância): ${finalScores.executor}%
+    - Comunicador (Influência): ${finalScores.comunicador}%
+    - Planejador (Estabilidade): ${finalScores.planejador}%
+    - Analista (Conformidade): ${finalScores.analista}%
+- **Adjetivos Selecionados:** ${JSON.stringify(allSelected)}
+# PROCESSO DE ANÁLISE (Passo a Passo)
+1.  **Identificar Perfil Principal e Secundário:**
+    * O \`perfil_principal\` é o fator com a maior pontuação.
+    * Identifique também o segundo fator com maior pontuação, pois ele modula e enriquece a análise do perfil principal.
+2.  **Elaborar o Resumo:**
+    * Inicie o \`resumo_comportamental\` descrevendo o perfil principal.
+    * Explique como o perfil secundário influencia o principal. (Ex: "Um perfil Executor com um forte componente Analista tende a tomar decisões baseadas em dados, sendo menos impulsivo que um Executor puro.")
+    * Incorpore os \`Adjetivos Selecionados\` no resumo para personalizar a análise e torná-la menos genérica. (Ex: "Sua natureza de Planejador se manifesta através de uma abordagem 'cuidadosa' e 'persistente'...")
+3.  **Avaliar Pontos Fortes:**
+    * Baseado no **Contexto da Análise**, liste comportamentos e traços do perfil que são altamente benéficos.
+4.  **Avaliar Pontos a Desenvolver:**
+    * Baseado no **Contexto da Análise**, identifique traços que podem ser desafios.
+    * **IMPORTANTE:** Use uma linguagem construtiva. Troque "pontos fracos" por "pontos de atenção" ou "desafios a gerenciar".
+# ESTRUTURA DE SAÍDA (JSON)
+Sua resposta final deve ser **APENAS** o objeto JSON abaixo, sem textos ou explicações adicionais fora dele.
+\`\`\`json
+{
+  "perfil_principal": "O nome do perfil com a maior pontuação (Executor, Comunicador, Planejador ou Analista)",
+  "perfil_secundario": "O nome do perfil com a segunda maior pontuação",
+  "resumo_comportamental": "Um parágrafo detalhado que descreve o estilo de trabalho do candidato, combinando o perfil principal, o secundário e os adjetivos selecionados.",
+  "pontos_fortes_contextuais": [
+    "Ponto forte 1, explicado de forma clara e relacionado ao contexto.",
+    "Ponto forte 2, explicado de forma clara e relacionado ao contexto."
+  ],
+  "pontos_de_atencao": [
+    "Ponto a desenvolver 1, descrito de forma construtiva.",
+    "Ponto a desenvolver 2, descrito de forma construtiva."
+  ]
+}
+\`\`\`
+`;
+        let analiseIA = JSON.stringify({ error: "Falha ao gerar análise da IA." });
+        try {
+            const completion = await openai.chat.completions.create({ model: 'gpt-4o-mini', messages: [{ role: 'user', content: prompt }], temperature: 0.0, response_format: { type: "json_object" } });
+            analiseIA = completion.choices[0].message.content || analiseIA;
+        } catch (aiError) {
+            console.error("Erro na chamada para a OpenAI, tentando fallback para Groq:", aiError);
+            try {
+                const completion = await groq.chat.completions.create({
+                    messages: [{ role: 'user', content: prompt }],
+                    model: 'llama3-8b-8192',
+                    temperature: 0.0,
+                    response_format: { type: "json_object" }
+                });
+                analiseIA = completion.choices[0].message.content || analiseIA;
+            } catch (groqError) {
+                console.error("Erro na chamada para o Groq:", groqError);
+            }
         }
         
-        // Com a arquitetura "Respond to Webhook", o N8N já terá feito a análise e salvo no banco.
-        // Aqui, apenas confirmamos que o processo foi concluído.
-        console.log("Resposta recebida do n8n com sucesso.");
+        await baserowServer.post(RESULTADOS_TABLE_ID, {
+            avaliacao: [parseInt(assessmentId)], ...finalScores,
+            respostas_passo1: JSON.stringify(passo1), respostas_passo2: JSON.stringify(passo2), respostas_passo3: JSON.stringify(passo3),
+            analise_ia: analiseIA
+        });
+        await baserowServer.patch(AVALIACOES_TABLE_ID, parseInt(assessmentId), { status: 'Concluído' });
         
-        res.status(200).json({ success: true, message: "Avaliação concluída e analisada com sucesso!" });
-
+        res.status(200).json({ success: true, message: "Avaliação concluída com sucesso!" });
     } catch (error) {
-        console.error("Erro no processo de submissão da avaliação:", error);
+        console.error("Erro ao submeter avaliação:", error);
         res.status(500).json({ error: 'Não foi possível processar sua avaliação.' });
     }
 });
@@ -594,15 +613,7 @@ app.get('/api/assessment/result/:assessmentId', async (req: Request, res: Respon
         const { results } = await baserowServer.get(RESULTADOS_TABLE_ID, `?filter__avaliacao__link_row_has=${assessmentId}`);
         if (results && results.length > 0) {
             const profileData = results[0];
-            
-            if (profileData.analise_ia && typeof profileData.analise_ia === 'string') {
-                try {
-                    profileData.analise_ia = JSON.parse(profileData.analise_ia);
-                } catch (e) {
-                    profileData.analise_ia = null;
-                }
-            }
-            
+            try { profileData.analise_ia = JSON.parse(profileData.analise_ia); } catch (e) {}
             res.json({ success: true, result: profileData });
         } else {
             res.status(404).json({ error: "Resultado da avaliação não encontrado." });
