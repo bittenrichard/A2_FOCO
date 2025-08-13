@@ -10,8 +10,6 @@ import { baserowServer } from './src/shared/services/baserowServerClient.js';
 import fetch from 'node-fetch';
 import bcrypt from 'bcryptjs';
 import multer from 'multer';
-import OpenAI from 'openai';
-import Groq from 'groq-sdk';
 
 const app = express();
 const port = 3001;
@@ -25,14 +23,6 @@ app.use(cors(corsOptions));
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-
-// --- CONFIGURAÇÃO DAS IAs ---
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
-const groq = new Groq({
-    apiKey: process.env.GROQ_API_KEY,
-});
 
 if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET || !process.env.GOOGLE_REDIRECT_URI) {
   console.error("ERRO CRÍTICO: As credenciais do Google não foram encontradas...");
@@ -50,8 +40,7 @@ const VAGAS_TABLE_ID = '709';
 const CANDIDATOS_TABLE_ID = '710';
 const WHATSAPP_CANDIDATOS_TABLE_ID = '712';
 const AGENDAMENTOS_TABLE_ID = '713';
-const AVALIACOES_TABLE_ID = '727';
-const RESULTADOS_TABLE_ID = '728';
+const ASSESSMENT_TABLE_ID = '727';
 const SALT_ROUNDS = 10;
 
 interface BaserowJobPosting {
@@ -365,6 +354,26 @@ app.post('/api/upload-curriculums', upload.array('curriculumFiles'), async (req:
       const createdCandidate = await baserowServer.post(CANDIDATOS_TABLE_ID, newCandidateData);
       newCandidateEntries.push(createdCandidate);
     }
+    // LÓGICA DO WEBHOOK DE TRIAGEM RESTAURADA
+    const N8N_TRIAGEM_WEBHOOK_URL = 'https://webhook.focoserv.com.br/webhook/recrutamento';
+    const jobInfo = await baserowServer.getRow(VAGAS_TABLE_ID, parseInt(jobId as string));
+    const userInfo = await baserowServer.getRow(USERS_TABLE_ID, parseInt(userId as string));
+    if (N8N_TRIAGEM_WEBHOOK_URL && newCandidateEntries.length > 0 && jobInfo && userInfo) {
+        const candidatosParaWebhook = newCandidateEntries.map(c => ({
+            id: c.id, nome: c.nome, curriculo_url: c.curriculo?.[0]?.url
+        }));
+        const webhookPayload = {
+            tipo: 'triagem_curriculo_lote',
+            recrutador: { id: userInfo.id, nome: userInfo.nome, email: userInfo.Email },
+            vaga: { id: jobInfo.id, titulo: jobInfo.titulo, descricao: jobInfo.descricao },
+            candidatos: candidatosParaWebhook
+        };
+        fetch(N8N_TRIAGEM_WEBHOOK_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(webhookPayload)
+        }).catch(err => console.error("Erro ao disparar webhook de triagem:", err));
+    }
     res.json({ success: true, message: `${files.length} currículo(s) enviado(s) para análise!`, newCandidates: newCandidateEntries });
   } catch (error: any) {
     console.error('Erro no upload de currículos (backend):', error);
@@ -462,7 +471,7 @@ app.post('/api/google/calendar/create-event', async (req: Request, res: Response
   }
 });
 
-// --- NOVA FEATURE: PERFIL COMPORTAMENTAL ---
+// --- FEATURE: PERFIL COMPORTAMENTAL (FLUXO WEBHOOK) ---
 
 const adjetivos = [
   'Alegre', 'Animado', 'Anti-Social', 'Arrogante', 'Ativo', 'Bem-Quisto', 'Bom Companheiro', 'Calculista', 'Calmo', 'Compreensivo',
@@ -516,16 +525,13 @@ app.post('/api/assessment/:assessmentId/submit', async (req: Request, res: Respo
             respostas_passo2: JSON.stringify(passo2),
             respostas_passo3: JSON.stringify(passo3),
         });
-        
         const payloadToN8N = {
             assessmentId: parseInt(assessmentId),
             answers: { passo1, passo2, passo3 }
         };
-
         if (!process.env.N8N_ASSESSMENT_WEBHOOK_URL) {
             throw new Error("Webhook URL do N8N não configurada.");
         }
-
         fetch(process.env.N8N_ASSESSMENT_WEBHOOK_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -533,7 +539,6 @@ app.post('/api/assessment/:assessmentId/submit', async (req: Request, res: Respo
         }).catch(err => {
             console.error("Erro ao disparar webhook para o N8N (não bloqueante):", err);
         });
-        
         res.status(200).json({ success: true, message: "Avaliação recebida! O resultado está sendo processado." });
     } catch (error) {
         console.error("Erro ao submeter avaliação:", error);
@@ -544,15 +549,12 @@ app.post('/api/assessment/:assessmentId/submit', async (req: Request, res: Respo
 app.post('/api/assessment/webhook-response', async (req: Request, res: Response) => {
     const { assessmentId, scores, analise_ia } = req.body;
     const secret = req.headers['x-webhook-secret'];
-
     if (secret !== process.env.N8N_WEBHOOK_SECRET) {
         return res.status(401).json({ error: "Não autorizado." });
     }
-
     if (!assessmentId || !scores || !analise_ia) {
         return res.status(400).json({ error: "Dados incompletos." });
     }
-
     try {
         await baserowServer.patch(ASSESSMENT_TABLE_ID, assessmentId, {
             status: 'Concluído',
