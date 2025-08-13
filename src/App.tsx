@@ -1,7 +1,7 @@
 // Local: src/App.tsx
 
 import React, { useEffect, useState } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate } from 'react-router-dom'; // <-- CORREÇÃO AQUI
+import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from './features/auth/hooks/useAuth';
 import { AuthProvider } from './features/auth/context/AuthContext';
 import LoginPage from './features/auth/components/LoginPage';
@@ -37,9 +37,11 @@ const LoadingSpinner: React.FC = () => (
 const AppRoutes: React.FC = () => {
     const { profile, isAuthenticated, isLoading: isAuthLoading, signOut } = useAuth();
     const { jobs, candidates, isDataLoading, fetchAllData } = useDataStore();
-    const [currentPage, setCurrentPage] = useState<PageKey>('dashboard');
-    const [selectedJob, setSelectedJob] = useState<JobPosting | null>(null);
     const navigate = useNavigate();
+    const location = useLocation();
+
+    // Estado para manter a vaga selecionada entre as navegações
+    const [selectedJob, setSelectedJob] = useState<JobPosting | null>(null);
 
     useEffect(() => {
         if (isAuthenticated && profile) {
@@ -49,22 +51,23 @@ const AppRoutes: React.FC = () => {
 
     const handleViewResults = (job: JobPosting) => {
         setSelectedJob(job);
-        setCurrentPage('results');
+        navigate('/results');
     };
 
     const handleEditJob = (job: JobPosting) => {
         setSelectedJob(job);
-        setCurrentPage('edit-screening');
+        navigate('/edit-screening');
     };
 
     const handleJobCreated = (newJob: JobPosting) => {
         useDataStore.getState().addJob(newJob);
         setSelectedJob(newJob);
-        setCurrentPage('results');
+        navigate('/results');
     };
 
     const handleJobUpdated = () => {
-        setCurrentPage('dashboard');
+        fetchAllData(profile!); // Atualiza os dados para refletir a mudança
+        navigate('/dashboard');
     };
 
     const handleDeleteJob = async (jobId: number) => {
@@ -77,39 +80,37 @@ const AppRoutes: React.FC = () => {
     
     const handleLogout = () => {
         signOut();
-        navigate('/login');
+        // A navegação será tratada pelo componente AppContent
     };
 
-    if (isAuthLoading || (isAuthenticated && isDataLoading)) {
-        return <LoadingSpinner />;
-    }
+    const pageKey = (location.pathname.substring(1) || 'dashboard') as PageKey;
     
+    // Se não estiver autenticado, o componente AppContent redirecionará para /login
     if (!isAuthenticated) {
         return <Navigate to="/login" replace />;
     }
-
-    const renderContent = () => {
-        switch (currentPage) {
-            case 'dashboard': return <DashboardPage jobs={jobs} candidates={candidates} onViewResults={handleViewResults} onDeleteJob={handleDeleteJob} onNavigate={setCurrentPage} onEditJob={handleEditJob} />;
-            case 'new-screening': return <NewScreeningPage onJobCreated={handleJobCreated} onCancel={() => setCurrentPage('dashboard')} />;
-            case 'edit-screening': return selectedJob ? <EditScreeningPage jobToEdit={selectedJob} onJobUpdated={handleJobUpdated} onCancel={() => setCurrentPage('dashboard')} /> : <Navigate to="/dashboard" replace />;
-            case 'results': return <ResultsPage selectedJob={selectedJob} candidates={candidates} onDataSynced={() => profile && fetchAllData(profile)} />;
-            case 'database': return <CandidateDatabasePage />;
-            case 'agenda': return <AgendaPage />;
-            case 'settings': return <SettingsPage />;
-            default: return <Navigate to="/dashboard" replace />;
-        }
-    };
+    
+    if (isAuthLoading || (isAuthenticated && isDataLoading)) {
+        return <LoadingSpinner />;
+    }
 
     return (
         <DndProvider backend={HTML5Backend}>
-            <MainLayout currentPage={currentPage} user={profile} onNavigate={setCurrentPage} onLogout={handleLogout}>
-                {renderContent()}
+            <MainLayout currentPage={pageKey} user={profile} onNavigate={(page) => navigate(`/${page}`)} onLogout={handleLogout}>
+                <Routes>
+                    <Route path="/dashboard" element={<DashboardPage jobs={jobs} candidates={candidates} onViewResults={handleViewResults} onDeleteJob={handleDeleteJob} onNavigate={(page) => navigate(`/${page}`)} onEditJob={handleEditJob} />} />
+                    <Route path="/new-screening" element={<NewScreeningPage onJobCreated={handleJobCreated} onCancel={() => navigate('/dashboard')} />} />
+                    <Route path="/edit-screening" element={selectedJob ? <EditScreeningPage jobToEdit={selectedJob} onJobUpdated={handleJobUpdated} onCancel={() => navigate('/dashboard')} /> : <Navigate to="/dashboard" />} />
+                    <Route path="/results" element={<ResultsPage selectedJob={selectedJob} candidates={candidates} onDataSynced={() => profile && fetchAllData(profile)} />} />
+                    <Route path="/database" element={<CandidateDatabasePage />} />
+                    <Route path="/agenda" element={<AgendaPage />} />
+                    <Route path="/settings" element={<SettingsPage />} />
+                    <Route path="*" element={<Navigate to="/dashboard" />} />
+                </Routes>
             </MainLayout>
         </DndProvider>
     );
 };
-
 
 function AuthRoutes() {
     const { signIn, signUp, isLoading, error } = useAuth();
@@ -118,7 +119,7 @@ function AuthRoutes() {
     const handleLogin = async (credentials: LoginCredentials) => {
         const success = await signIn(credentials);
         if (success) {
-            navigate('/');
+            navigate('/dashboard');
         }
     };
 
@@ -138,23 +139,6 @@ function AuthRoutes() {
     );
 }
 
-
-function App() {
-    return (
-        <div className="font-inter antialiased">
-            <AuthProvider>
-                <Router>
-                    <Routes>
-                        <Route path="/assessment/:token" element={<AssessmentPage />} />
-                        <Route path="/assessment/result/:assessmentId" element={<AssessmentResultPage />} />
-                        <Route path="/*" element={<AppContent />} />
-                    </Routes>
-                </Router>
-            </AuthProvider>
-        </div>
-    );
-}
-
 function AppContent() {
     const { isAuthenticated, isLoading } = useAuth();
 
@@ -163,6 +147,22 @@ function AppContent() {
     }
 
     return isAuthenticated ? <AppRoutes /> : <AuthRoutes />;
+}
+
+function App() {
+    return (
+        <div className="font-inter antialiased">
+            <Router>
+                <AuthProvider>
+                    <Routes>
+                        <Route path="/assessment/:token" element={<AssessmentPage />} />
+                        <Route path="/assessment/result/:assessmentId" element={<AssessmentResultPage />} />
+                        <Route path="/*" element={<AppContent />} />
+                    </Routes>
+                </AuthProvider>
+            </Router>
+        </div>
+    );
 }
 
 export default App;

@@ -42,7 +42,6 @@ const KanbanColumn: React.FC<KanbanColumnProps> = ({ columnId, title, candidates
             candidate={candidate}
             onViewDetails={onViewDetails}
             onScheduleInterview={onScheduleInterview}
-            onUpdateStatus={onUpdateStatus}
           />
         ))}
       </div>

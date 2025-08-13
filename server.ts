@@ -10,6 +10,7 @@ import { baserowServer } from './src/shared/services/baserowServerClient.js';
 import fetch from 'node-fetch';
 import bcrypt from 'bcryptjs';
 import multer from 'multer';
+import FormData from 'form-data';
 import OpenAI from 'openai';
 import Groq from 'groq-sdk';
 
@@ -50,7 +51,7 @@ const VAGAS_TABLE_ID = '709';
 const CANDIDATOS_TABLE_ID = '710';
 const WHATSAPP_CANDIDATOS_TABLE_ID = '712';
 const AGENDAMENTOS_TABLE_ID = '713';
-const AVALIACOES_TABLE_ID = '727';
+const AVALIACOES_TABLE_ID = '727'; // CORREÇÃO: Variável correta para a tabela de avaliações.
 const RESULTADOS_TABLE_ID = '728';
 const SALT_ROUNDS = 10;
 
@@ -340,32 +341,71 @@ app.get('/api/data/all/:userId', async (req: Request, res: Response) => {
   }
 });
 
+// --- CORREÇÃO DO FLUXO DE UPLOAD DE CURRÍCULOS ---
 app.post('/api/upload-curriculums', upload.array('curriculumFiles'), async (req: Request, res: Response) => {
   const { jobId, userId } = req.body;
   const files = req.files as Express.Multer.File[];
+  const N8N_WEBHOOK_URL = process.env.N8N_FILE_UPLOAD_URL;
+
   if (!jobId || !userId || !files || files.length === 0) {
     return res.status(400).json({ error: 'Vaga, usuário e arquivos de currículo são obrigatórios.' });
   }
+  if (!N8N_WEBHOOK_URL) {
+    console.error("ERRO CRÍTICO: A variável de ambiente N8N_FILE_UPLOAD_URL não está configurada.");
+    return res.status(500).json({ error: 'O serviço de triagem está indisponível.' });
+  }
+
   try {
-    const newCandidateEntries = [];
-    for (const file of files) {
-      if (file.size > 5 * 1024 * 1024) {
-        return res.status(400).json({ success: false, message: `O arquivo '${file.originalname}' é muito grande. O limite é de 5MB.` });
-      }
-      const uploadedFile = await baserowServer.uploadFileFromBuffer(file.buffer, file.originalname, file.mimetype);
-      const newCandidateData = {
-        nome: file.originalname.split('.')[0] || 'Novo Candidato',
-        curriculo: [{ name: uploadedFile.name, url: uploadedFile.url }],
-        usuario: [parseInt(userId as string)],
-        vaga: [parseInt(jobId as string)],
-        score: null,
-        resumo_ia: null,
-        status: 'Triagem',
-      };
-      const createdCandidate = await baserowServer.post(CANDIDATOS_TABLE_ID, newCandidateData);
-      newCandidateEntries.push(createdCandidate);
+    const jobInfo = await baserowServer.getRow(VAGAS_TABLE_ID, parseInt(jobId));
+    if (!jobInfo) {
+      return res.status(404).json({ error: "Vaga não encontrada." });
     }
-    res.json({ success: true, message: `${files.length} currículo(s) enviado(s) para análise!`, newCandidates: newCandidateEntries });
+
+    const createdCandidates = [];
+
+    for (const file of files) {
+      // 1. Enviar arquivo e dados para o Webhook do n8n
+      const formData = new FormData();
+      formData.append('file', file.buffer, file.originalname);
+      formData.append('jobInfo', JSON.stringify(jobInfo));
+
+      const webhookResponse = await fetch(N8N_WEBHOOK_URL, {
+        method: 'POST',
+        body: formData,
+        headers: formData.getHeaders()
+      });
+
+      if (!webhookResponse.ok) {
+        console.error(`Erro ao chamar webhook para ${file.originalname}: ${webhookResponse.statusText}`);
+        // Pula para o próximo arquivo em caso de erro no webhook
+        continue;
+      }
+
+      const analysisResult = await webhookResponse.json();
+
+      // 2. Fazer upload do arquivo de currículo para o Baserow
+      const uploadedFile = await baserowServer.uploadFileFromBuffer(file.buffer, file.originalname, file.mimetype);
+
+      // 3. Criar o candidato no Baserow com os dados da análise
+      const newCandidateData = {
+        nome: analysisResult.nome || file.originalname.split('.')[0],
+        email: analysisResult.email,
+        telefone: analysisResult.telefone,
+        score: analysisResult.score,
+        resumo_ia: analysisResult.resumo_ia,
+        perfil_comportamental: analysisResult.perfil_comportamental,
+        curriculo: [{ name: uploadedFile.name, url: uploadedFile.url }],
+        usuario: [parseInt(userId)],
+        vaga: [parseInt(jobId)],
+        status: 'Triagem'
+      };
+
+      const createdCandidate = await baserowServer.post(CANDIDATOS_TABLE_ID, newCandidateData);
+      createdCandidates.push(createdCandidate);
+    }
+    
+    res.json({ success: true, message: `${createdCandidates.length} de ${files.length} currículo(s) foram processados com sucesso!`, newCandidates: createdCandidates });
+
   } catch (error: any) {
     console.error('Erro no upload de currículos (backend):', error);
     res.status(500).json({ success: false, message: error.message || 'Falha ao fazer upload dos currículos.' });
@@ -462,7 +502,7 @@ app.post('/api/google/calendar/create-event', async (req: Request, res: Response
   }
 });
 
-// --- NOVA FEATURE: PERFIL COMPORTAMENTAL ---
+// --- CORREÇÃO NA FEATURE: PERFIL COMPORTAMENTAL ---
 
 const adjetivos = [
   'Alegre', 'Animado', 'Anti-Social', 'Arrogante', 'Ativo', 'Bem-Quisto', 'Bom Companheiro', 'Calculista', 'Calmo', 'Compreensivo',
@@ -482,7 +522,7 @@ app.post('/api/candidates/:candidateId/create-assessment', async (req: Request, 
         const token = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
         const expiraEm = new Date();
         expiraEm.setDate(expiraEm.getDate() + 30);
-        await baserowServer.post(ASSESSMENT_TABLE_ID, {
+        await baserowServer.post(AVALIACOES_TABLE_ID, {
             candidato: [parseInt(candidateId)], token: token, status: 'Pendente', expira_em: expiraEm.toISOString().split('T')[0]
         });
         const assessmentLink = `https://recrutamentoia.com.br/assessment/${token}`;
@@ -495,7 +535,7 @@ app.post('/api/candidates/:candidateId/create-assessment', async (req: Request, 
 app.get('/api/assessment/:token', async (req: Request, res: Response) => {
     const { token } = req.params;
     try {
-        const { results } = await baserowServer.get(ASSESSMENT_TABLE_ID, `?filter__token__equal=${token}&filter__status__equal=Pendente`);
+        const { results } = await baserowServer.get(AVALIACOES_TABLE_ID, `?filter__token__equal=${token}&filter__status__equal=Pendente`);
         const assessment = results && results[0];
         if (!assessment) {
             return res.status(404).json({ error: 'Avaliação não encontrada, já respondida ou expirada.' });
@@ -510,7 +550,7 @@ app.post('/api/assessment/:assessmentId/submit', async (req: Request, res: Respo
     const { assessmentId } = req.params;
     const { passo1, passo2, passo3 } = req.body;
     try {
-        await baserowServer.patch(ASSESSMENT_TABLE_ID, parseInt(assessmentId), {
+        await baserowServer.patch(AVALIACOES_TABLE_ID, parseInt(assessmentId), {
             status: 'Processando',
             respostas_passo1: JSON.stringify(passo1),
             respostas_passo2: JSON.stringify(passo2),
@@ -554,7 +594,7 @@ app.post('/api/assessment/webhook-response', async (req: Request, res: Response)
     }
 
     try {
-        await baserowServer.patch(ASSESSMENT_TABLE_ID, assessmentId, {
+        await baserowServer.patch(AVALIACOES_TABLE_ID, assessmentId, {
             status: 'Concluído',
             executor: scores.executor,
             comunicador: scores.comunicador,
@@ -572,7 +612,7 @@ app.post('/api/assessment/webhook-response', async (req: Request, res: Response)
 app.get('/api/assessment/result/:assessmentId', async (req: Request, res: Response) => {
     const { assessmentId } = req.params;
     try {
-        const result = await baserowServer.getRow(ASSESSMENT_TABLE_ID, parseInt(assessmentId));
+        const result = await baserowServer.getRow(AVALIACOES_TABLE_ID, parseInt(assessmentId));
         if (result) {
             try {
                 if (result.analise_ia) {
@@ -592,7 +632,7 @@ app.get('/api/candidates/:candidateId/behavioral-profile', async (req: Request, 
     const { candidateId } = req.params;
     if (!candidateId) { return res.status(400).json({ error: 'ID do candidato é obrigatório.' }); }
     try {
-        const { results } = await baserowServer.get(ASSESSMENT_TABLE_ID, `?filter__candidato__link_row_has=${candidateId}&filter__status__equal=Concluído`);
+        const { results } = await baserowServer.get(AVALIACOES_TABLE_ID, `?filter__candidato__link_row_has=${candidateId}&filter__status__equal=Concluído`);
         if (results && results.length > 0) {
             const profileData = results[0];
              try {
