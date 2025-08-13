@@ -10,8 +10,6 @@ import { baserowServer } from './src/shared/services/baserowServerClient.js';
 import fetch from 'node-fetch';
 import bcrypt from 'bcryptjs';
 import multer from 'multer';
-import OpenAI from 'openai';
-import Groq from 'groq-sdk';
 
 const app = express();
 const port = 3001;
@@ -26,13 +24,6 @@ app.use(cors(corsOptions));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// --- CONFIGURAÇÃO DAS IAs ---
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
-const groq = new Groq({
-    apiKey: process.env.GROQ_API_KEY,
-});
 
 if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET || !process.env.GOOGLE_REDIRECT_URI) {
   console.error("ERRO CRÍTICO: As credenciais do Google não foram encontradas...");
@@ -50,8 +41,7 @@ const VAGAS_TABLE_ID = '709';
 const CANDIDATOS_TABLE_ID = '710';
 const WHATSAPP_CANDIDATOS_TABLE_ID = '712';
 const AGENDAMENTOS_TABLE_ID = '713';
-const AVALIACOES_TABLE_ID = '727';
-const RESULTADOS_TABLE_ID = '728';
+const ASSESSMENT_TABLE_ID = '727';
 const SALT_ROUNDS = 10;
 
 interface BaserowJobPosting {
