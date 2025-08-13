@@ -11,8 +11,6 @@ import fetch from 'node-fetch';
 import bcrypt from 'bcryptjs';
 import multer from 'multer';
 import FormData from 'form-data';
-import OpenAI from 'openai';
-import Groq from 'groq-sdk';
 
 const app = express();
 const port = 3001;
@@ -26,14 +24,6 @@ app.use(cors(corsOptions));
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-
-// --- CONFIGURAÇÃO DAS IAs ---
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
-const groq = new Groq({
-    apiKey: process.env.GROQ_API_KEY,
-});
 
 if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET || !process.env.GOOGLE_REDIRECT_URI) {
   console.error("ERRO CRÍTICO: As credenciais do Google não foram encontradas...");
@@ -51,7 +41,7 @@ const VAGAS_TABLE_ID = '709';
 const CANDIDATOS_TABLE_ID = '710';
 const WHATSAPP_CANDIDATOS_TABLE_ID = '712';
 const AGENDAMENTOS_TABLE_ID = '713';
-const AVALIACOES_TABLE_ID = '727'; // CORREÇÃO: Variável correta para a tabela de avaliações.
+const AVALIACOES_TABLE_ID = '727';
 const RESULTADOS_TABLE_ID = '728';
 const SALT_ROUNDS = 10;
 
@@ -341,7 +331,6 @@ app.get('/api/data/all/:userId', async (req: Request, res: Response) => {
   }
 });
 
-// --- CORREÇÃO DO FLUXO DE UPLOAD DE CURRÍCULOS ---
 app.post('/api/upload-curriculums', upload.array('curriculumFiles'), async (req: Request, res: Response) => {
   const { jobId, userId } = req.body;
   const files = req.files as Express.Multer.File[];
@@ -364,7 +353,6 @@ app.post('/api/upload-curriculums', upload.array('curriculumFiles'), async (req:
     const createdCandidates = [];
 
     for (const file of files) {
-      // 1. Enviar arquivo e dados para o Webhook do n8n
       const formData = new FormData();
       formData.append('file', file.buffer, file.originalname);
       formData.append('jobInfo', JSON.stringify(jobInfo));
@@ -377,16 +365,12 @@ app.post('/api/upload-curriculums', upload.array('curriculumFiles'), async (req:
 
       if (!webhookResponse.ok) {
         console.error(`Erro ao chamar webhook para ${file.originalname}: ${webhookResponse.statusText}`);
-        // Pula para o próximo arquivo em caso de erro no webhook
         continue;
       }
 
       const analysisResult = await webhookResponse.json();
-
-      // 2. Fazer upload do arquivo de currículo para o Baserow
       const uploadedFile = await baserowServer.uploadFileFromBuffer(file.buffer, file.originalname, file.mimetype);
 
-      // 3. Criar o candidato no Baserow com os dados da análise
       const newCandidateData = {
         nome: analysisResult.nome || file.originalname.split('.')[0],
         email: analysisResult.email,
@@ -501,8 +485,6 @@ app.post('/api/google/calendar/create-event', async (req: Request, res: Response
     res.status(500).json({ success: false, message: 'Falha ao criar evento.' });
   }
 });
-
-// --- CORREÇÃO NA FEATURE: PERFIL COMPORTAMENTAL ---
 
 const adjetivos = [
   'Alegre', 'Animado', 'Anti-Social', 'Arrogante', 'Ativo', 'Bem-Quisto', 'Bom Companheiro', 'Calculista', 'Calmo', 'Compreensivo',
