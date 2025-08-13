@@ -1,123 +1,76 @@
 // Local: src/features/dashboard/components/DashboardPage.tsx
 
-import React, { useState, useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import StatCard from './StatCard';
 import RecentScreenings from './RecentScreenings';
+import WelcomeEmptyState from './WelcomeEmptyState';
 import { useDashboardStats } from '../hooks/useDashboardStats';
-import { JobPosting } from '../../screening/types';
-import { PageKey } from '../../../shared/types';
 import ApprovedCandidatesModal from './ApprovedCandidatesModal';
-import { Candidate } from '../../results/types';
-import DeleteJobModal from './DeleteJobModal';
+import { JobPosting } from '../../screening/types';
+import { Candidate, PageKey } from '../../../shared/types';
+import { Users, FileText, UserCheck, Star } from 'lucide-react';
 
 interface DashboardPageProps {
   jobs: JobPosting[];
   candidates: Candidate[];
   onViewResults: (job: JobPosting) => void;
-  onDeleteJob: (jobId: number) => Promise<void>;
+  onEditJob: (job: JobPosting) => void;
+  onDeleteJob: (jobId: number) => void;
   onNavigate: (page: PageKey) => void;
-  onEditJob: (job: JobPosting) => void; // <-- NOVA PROP
 }
 
-const DashboardPage: React.FC<DashboardPageProps> = ({
-  jobs,
-  candidates,
-  onViewResults,
-  onDeleteJob,
-  onNavigate,
-  onEditJob, // <-- NOVA PROP
-}) => {
+const DashboardPage: React.FC<DashboardPageProps> = ({ jobs, candidates, onViewResults, onEditJob, onDeleteJob, onNavigate }) => {
   const { stats } = useDashboardStats(jobs, candidates);
-  const [searchTerm, setSearchTerm] = useState('');
-  
-  const [isApprovedModalOpen, setIsApprovedModalOpen] = useState(false);
-  const [jobToDelete, setJobToDelete] = useState<JobPosting | null>(null);
-  const [isDeleting, setIsDeleting] = useState(false);
-  
+  const [isModalOpen, setModalOpen] = useState(false);
+
   const approvedCandidates = useMemo(() => {
     const activeJobIds = new Set(jobs.map(job => job.id));
-    return candidates.filter(c =>
-      c.score && c.score >= 90 &&
-      c.vaga && c.vaga.some(v => activeJobIds.has(v.id))
+    return candidates.filter(candidate => 
+        (candidate.score && candidate.score >= 90) &&
+        candidate.vaga && candidate.vaga.some((v: { id: number }) => activeJobIds.has(v.id))
     );
   }, [jobs, candidates]);
 
-  const filteredJobs = useMemo(() => {
-    const jobsWithStats = jobs.map(job => {
-        const jobCandidates = candidates.filter(c => c.vaga && c.vaga.some(v => v.id === job.id));
-        const candidateCount = jobCandidates.length;
-        let averageScore = 0;
-        if (candidateCount > 0) {
-            const totalScore = jobCandidates.reduce((acc, curr) => acc + (Number(curr.score) || 0), 0);
-            averageScore = Math.round(totalScore / candidateCount);
-        }
-        return { ...job, candidateCount, averageScore };
+  const recentJobs = useMemo(() => {
+    const sortedJobs = [...jobs].sort((a, b) => new Date(b.order).getTime() - new Date(a.order).getTime());
+    return sortedJobs.slice(0, 5);
+  }, [jobs]);
+  
+  const jobsWithCandidateCounts = useMemo(() => {
+    return recentJobs.map(job => {
+        const count = candidates.filter(c => c.vaga && c.vaga.some((v: {id: number}) => v.id === job.id)).length;
+        return { ...job, candidateCount: count };
     });
+  }, [recentJobs, candidates]);
 
-    if (!searchTerm) return jobsWithStats;
-    return jobsWithStats.filter(job =>
-      job.titulo.toLowerCase().includes(searchTerm.toLowerCase())
-    );
-  }, [jobs, candidates, searchTerm]);
 
-  const statsData = [
-    { title: 'Vagas Ativas', value: stats.activeJobs, iconName: 'briefcase', iconColor: 'text-indigo-600', iconBg: 'bg-indigo-100' },
-    { title: 'Candidatos Triados', value: stats.totalCandidates, iconName: 'users', iconColor: 'text-green-600', iconBg: 'bg-green-100' },
-    { title: 'Score de Compatibilidade', value: `${stats.averageScore}%`, iconName: 'check', iconColor: 'text-blue-600', iconBg: 'bg-blue-100' },
-    { title: 'Aprovados (>90%)', value: stats.approvedCandidates, iconName: 'award', iconColor: 'text-amber-600', iconBg: 'bg-amber-100', onClick: () => setIsApprovedModalOpen(true) }
-  ];
-
-  const handleOpenDeleteModal = (job: JobPosting) => {
-    setJobToDelete(job);
-  };
-
-  const handleCloseDeleteModal = () => {
-    setJobToDelete(null);
-  };
-
-  const handleConfirmDelete = async () => {
-    if (jobToDelete) {
-      setIsDeleting(true);
-      await onDeleteJob(jobToDelete.id);
-      setIsDeleting(false);
-      setJobToDelete(null);
-    }
-  };
+  if (jobs.length === 0) {
+    return <WelcomeEmptyState onNavigate={() => onNavigate('new-screening')} />;
+  }
 
   return (
-    <>
-      <div className="fade-in">
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
-          {statsData.map((stat, index) => <StatCard key={index} {...stat} />)}
-        </div>
-        <RecentScreenings
-          jobs={filteredJobs}
-          onViewResults={onViewResults}
-          onOpenDeleteModal={handleOpenDeleteModal}
-          onEditJob={onEditJob} // <-- PASSANDO A PROP ADIANTE
-          onNewScreening={() => onNavigate('new-screening')}
-          searchTerm={searchTerm}
-          setSearchTerm={setSearchTerm}
-        />
+    <div className="p-6 space-y-6">
+      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
+        <StatCard icon={FileText} title="Vagas Ativas" value={stats.activeJobs} />
+        <StatCard icon={Users} title="Total de Candidatos" value={stats.totalCandidates} />
+        <StatCard icon={UserCheck} title="Candidatos Aprovados" value={stats.approvedCandidates} unit="candidatos" onAction={() => setModalOpen(true)} isActionable={true}/>
+        <StatCard icon={Star} title="Score Médio" value={stats.averageScore} unit="pontos" />
       </div>
-      
-      {isApprovedModalOpen && (
-        <ApprovedCandidatesModal 
-          candidates={approvedCandidates}
-          isLoading={false}
-          onClose={() => setIsApprovedModalOpen(false)} 
-        />
-      )}
 
-      {jobToDelete && (
-        <DeleteJobModal
-            jobTitle={jobToDelete.titulo}
-            onClose={handleCloseDeleteModal}
-            onConfirm={handleConfirmDelete}
-            isDeleting={isDeleting}
-        />
-      )}
-    </>
+      <RecentScreenings
+        jobs={jobsWithCandidateCounts}
+        onViewResults={onViewResults}
+        onEditJob={onEditJob}
+        onDeleteJob={onDeleteJob}
+        onNavigate={onNavigate}
+      />
+      
+      <ApprovedCandidatesModal 
+        isOpen={isModalOpen} 
+        onClose={() => setModalOpen(false)} 
+        candidates={approvedCandidates}
+      />
+    </div>
   );
 };
 

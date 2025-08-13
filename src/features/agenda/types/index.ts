@@ -1,21 +1,15 @@
-import { Candidate } from "../../results/types";
+// Local: src/features/agenda/types/index.ts
+
 import { JobPosting } from "../../screening/types";
+import { Candidate } from "../../../shared/types";
 
-// Representa um agendamento como vem do Baserow
-export interface ScheduleEvent {
-  id: number;
-  Título: string;
-  Início: string; // Formato ISO (ex: "2025-07-28T14:00:00Z")
-  Fim: string;
-  Detalhes?: string;
-  Candidato: Candidate[]; // Link to table retorna um array
-  Vaga: JobPosting[];
-}
-
-// Formato que o componente de calendário espera
 export interface CalendarEvent {
+  id: number;
   title: string;
   start: Date;
   end: Date;
-  resource: ScheduleEvent; // Guarda o evento original do Baserow
+  details?: string;
+  candidate: Candidate;
+  job: JobPosting;
+  google_event_link?: string;
 }
