@@ -10,8 +10,6 @@ import { baserowServer } from './src/shared/services/baserowServerClient.js';
 import fetch from 'node-fetch';
 import bcrypt from 'bcryptjs';
 import multer from 'multer';
-import OpenAI from 'openai';
-import Groq from 'groq-sdk';
 
 const app = express();
 const port = 3001;
@@ -25,15 +23,6 @@ app.use(cors(corsOptions));
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-
-// --- CONFIGURAÇÃO DAS IAs ---
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
-const groq = new Groq({
-    apiKey: process.env.GROQ_API_KEY,
-});
-
 
 if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET || !process.env.GOOGLE_REDIRECT_URI) {
   console.error("ERRO CRÍTICO: As credenciais do Google não foram encontradas...");
@@ -475,12 +464,6 @@ const adjetivos = [
   'Pretensioso', 'Procrastinador', 'Racional', 'Reservado', 'Resoluto (Decidido)', 'Rotineiro', 'Sarcástico', 'Sensível', 'Sentimental', 'Simpático',
   'Sincero', 'Temeroso', 'Teórico', 'Tranquilo', 'Vaidoso', 'Vingativo'
 ];
-const perfilMap: { [key: string]: string } = {
-    'Audacioso (Ousado)': 'E', 'Líder': 'E', 'Exigente': 'E', 'Decidido': 'E', 'Independente': 'E', 'Corajoso': 'E', 'Firme': 'E', 'Ativo': 'E', 'Enérgico': 'E',
-    'Comunicativo': 'C', 'Popular': 'C', 'Entusiasta': 'C', 'Otimista': 'C', 'Contagiante': 'C', 'Influenciador': 'C', 'Alegre': 'C', 'Animado': 'C', 'Simpático': 'C',
-    'Calmo': 'P', 'Paciente': 'P', 'Leal': 'P', 'Tranquilo': 'P', 'Conservador': 'P', 'Dedicado': 'P', 'Compreensivo': 'P', 'Bom Companheiro': 'P', 'Modesto': 'P',
-    'Perfeccionista': 'A', 'Minucioso': 'A', 'Racional': 'A', 'Calculista': 'A', 'Crítico': 'A', 'Prático': 'A', 'Auto-Disciplinado': 'A', 'Eficiente': 'A', 'Cumpridor': 'A'
-};
 
 app.post('/api/candidates/:candidateId/create-assessment', async (req: Request, res: Response) => {
     const { candidateId } = req.params;
@@ -488,7 +471,7 @@ app.post('/api/candidates/:candidateId/create-assessment', async (req: Request, 
         const token = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
         const expiraEm = new Date();
         expiraEm.setDate(expiraEm.getDate() + 30);
-        await baserowServer.post(AVALIACOES_TABLE_ID, {
+        await baserowServer.post(ASSESSMENT_TABLE_ID, {
             candidato: [parseInt(candidateId)], token: token, status: 'Pendente', expira_em: expiraEm.toISOString().split('T')[0]
         });
         const assessmentLink = `https://recrutamentoia.com.br/assessment/${token}`;
@@ -501,9 +484,9 @@ app.post('/api/candidates/:candidateId/create-assessment', async (req: Request, 
 app.get('/api/assessment/:token', async (req: Request, res: Response) => {
     const { token } = req.params;
     try {
-        const { results } = await baserowServer.get(AVALIACOES_TABLE_ID, `?filter__token__equal=${token}`);
+        const { results } = await baserowServer.get(ASSESSMENT_TABLE_ID, `?filter__token__equal=${token}&filter__status__equal=Pendente`);
         const assessment = results && results[0];
-        if (!assessment || assessment.status === 'Concluído') {
+        if (!assessment) {
             return res.status(404).json({ error: 'Avaliação não encontrada, já respondida ou expirada.' });
         }
         res.json({ success: true, assessmentId: assessment.id, adjectives: adjetivos });
@@ -516,105 +499,77 @@ app.post('/api/assessment/:assessmentId/submit', async (req: Request, res: Respo
     const { assessmentId } = req.params;
     const { passo1, passo2, passo3 } = req.body;
     try {
-        const scores: { [key: string]: number } = { E: 0, C: 0, P: 0, A: 0 };
-        const allSelected = [...(passo1 || []), ...(passo2 || []), ...(passo3 || [])];
-        allSelected.forEach(adjetivo => {
-            const perfil = perfilMap[adjetivo];
-            if (perfil) { scores[perfil] = (scores[perfil] || 0) + 1; }
+        await baserowServer.patch(ASSESSMENT_TABLE_ID, parseInt(assessmentId), {
+            status: 'Processando',
+            respostas_passo1: JSON.stringify(passo1),
+            respostas_passo2: JSON.stringify(passo2),
+            respostas_passo3: JSON.stringify(passo3),
         });
-        const total = Object.values(scores).reduce((sum, val) => sum + val, 0);
-        const finalScores = {
-            executor: total > 0 ? parseFloat(((scores.E / total) * 100).toFixed(2)) : 0,
-            comunicador: total > 0 ? parseFloat(((scores.C / total) * 100).toFixed(2)) : 0,
-            planejador: total > 0 ? parseFloat(((scores.P / total) * 100).toFixed(2)) : 0,
-            analista: total > 0 ? parseFloat(((scores.A / total) * 100).toFixed(2)) : 0,
+        
+        const payloadToN8N = {
+            assessmentId: parseInt(assessmentId),
+            answers: { passo1, passo2, passo3 },
+            allSelected: [...(passo1 || []), ...(passo2 || []), ...(passo3 || [])]
         };
-        
-        const prompt = `
-# PERSONA
-Você é um Analista Comportamental Sênior, especialista certificado na metodologia DISC. Sua comunicação é clara, objetiva e sempre construtiva. Sua análise vai além dos rótulos, focando em como os traços se manifestam no ambiente de trabalho.
-# OBJETIVO
-Analisar os dados de um perfil DISC para gerar um resumo coeso e prático, identificando o perfil predominante, os pontos fortes e os pontos de atenção, considerando o contexto de uma vaga ou do desenvolvimento profissional.
-# DADOS DE ENTRADA
-- **Contexto da Análise:** "Análise de perfil para desenvolvimento profissional e adequação geral a um ambiente de trabalho corporativo."
-- **Scores Percentuais:**
-    - Executor (Dominância): ${finalScores.executor}%
-    - Comunicador (Influência): ${finalScores.comunicador}%
-    - Planejador (Estabilidade): ${finalScores.planejador}%
-    - Analista (Conformidade): ${finalScores.analista}%
-- **Adjetivos Selecionados:** ${JSON.stringify(allSelected)}
-# PROCESSO DE ANÁLISE (Passo a Passo)
-1.  **Identificar Perfil Principal e Secundário:**
-    * O \`perfil_principal\` é o fator com a maior pontuação.
-    * Identifique também o segundo fator com maior pontuação, pois ele modula e enriquece a análise do perfil principal.
-2.  **Elaborar o Resumo:**
-    * Inicie o \`resumo_comportamental\` descrevendo o perfil principal.
-    * Explique como o perfil secundário influencia o principal. (Ex: "Um perfil Executor com um forte componente Analista tende a tomar decisões baseadas em dados, sendo menos impulsivo que um Executor puro.")
-    * Incorpore os \`Adjetivos Selecionados\` no resumo para personalizar a análise e torná-la menos genérica. (Ex: "Sua natureza de Planejador se manifesta através de uma abordagem 'cuidadosa' e 'persistente'...")
-3.  **Avaliar Pontos Fortes:**
-    * Baseado no **Contexto da Análise**, liste comportamentos e traços do perfil que são altamente benéficos.
-4.  **Avaliar Pontos a Desenvolver:**
-    * Baseado no **Contexto da Análise**, identifique traços que podem ser desafios.
-    * **IMPORTANTE:** Use uma linguagem construtiva. Troque "pontos fracos" por "pontos de atenção" ou "desafios a gerenciar".
-# ESTRUTURA DE SAÍDA (JSON)
-Sua resposta final deve ser **APENAS** o objeto JSON abaixo, sem textos ou explicações adicionais fora dele.
-\`\`\`json
-{
-  "perfil_principal": "O nome do perfil com a maior pontuação (Executor, Comunicador, Planejador ou Analista)",
-  "perfil_secundario": "O nome do perfil com a segunda maior pontuação",
-  "resumo_comportamental": "Um parágrafo detalhado que descreve o estilo de trabalho do candidato, combinando o perfil principal, o secundário e os adjetivos selecionados.",
-  "pontos_fortes_contextuais": [
-    "Ponto forte 1, explicado de forma clara e relacionado ao contexto.",
-    "Ponto forte 2, explicado de forma clara e relacionado ao contexto."
-  ],
-  "pontos_de_atencao": [
-    "Ponto a desenvolver 1, descrito de forma construtiva.",
-    "Ponto a desenvolver 2, descrito de forma construtiva."
-  ]
-}
-\`\`\`
-`;
-        let analiseIA = JSON.stringify({ error: "Falha ao gerar análise da IA." });
-        try {
-            const completion = await openai.chat.completions.create({ model: 'gpt-4o-mini', messages: [{ role: 'user', content: prompt }], temperature: 0.0, response_format: { type: "json_object" } });
-            analiseIA = completion.choices[0].message.content || analiseIA;
-        } catch (aiError) {
-            console.error("Erro na chamada para a OpenAI, tentando fallback para Groq:", aiError);
-            try {
-                const completion = await groq.chat.completions.create({
-                    messages: [{ role: 'user', content: prompt }],
-                    model: 'llama3-8b-8192',
-                    temperature: 0.0,
-                    response_format: { type: "json_object" }
-                });
-                analiseIA = completion.choices[0].message.content || analiseIA;
-            } catch (groqError) {
-                console.error("Erro na chamada para o Groq:", groqError);
-            }
+
+        if (!process.env.N8N_ASSESSMENT_WEBHOOK_URL) {
+            throw new Error("Webhook URL do N8N não configurada.");
         }
-        
-        await baserowServer.post(RESULTADOS_TABLE_ID, {
-            avaliacao: [parseInt(assessmentId)], ...finalScores,
-            respostas_passo1: JSON.stringify(passo1), respostas_passo2: JSON.stringify(passo2), respostas_passo3: JSON.stringify(passo3),
-            analise_ia: analiseIA
+
+        fetch(process.env.N8N_ASSESSMENT_WEBHOOK_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payloadToN8N)
+        }).catch(err => {
+            console.error("Erro ao disparar webhook para o N8N (não bloqueante):", err);
         });
-        await baserowServer.patch(AVALIACOES_TABLE_ID, parseInt(assessmentId), { status: 'Concluído' });
         
-        res.status(200).json({ success: true, message: "Avaliação concluída com sucesso!" });
+        res.status(200).json({ success: true, message: "Avaliação recebida! O resultado está sendo processado." });
     } catch (error) {
         console.error("Erro ao submeter avaliação:", error);
         res.status(500).json({ error: 'Não foi possível processar sua avaliação.' });
     }
 });
 
+app.post('/api/assessment/webhook-response', async (req: Request, res: Response) => {
+    const { assessmentId, scores, analise_ia } = req.body;
+    const secret = req.headers['x-webhook-secret'];
+
+    if (secret !== process.env.N8N_WEBHOOK_SECRET) {
+        return res.status(401).json({ error: "Não autorizado." });
+    }
+
+    if (!assessmentId || !scores || !analise_ia) {
+        return res.status(400).json({ error: "Dados incompletos." });
+    }
+
+    try {
+        await baserowServer.patch(ASSESSMENT_TABLE_ID, assessmentId, {
+            status: 'Concluído',
+            executor: scores.executor,
+            comunicador: scores.comunicador,
+            planejador: scores.planejador,
+            analista: scores.analista,
+            analise_ia: JSON.stringify(analise_ia)
+        });
+        res.status(200).json({ success: true });
+    } catch (error) {
+        console.error("Erro ao salvar resposta do webhook:", error);
+        res.status(500).json({ error: 'Falha ao salvar a análise.' });
+    }
+});
+
 app.get('/api/assessment/result/:assessmentId', async (req: Request, res: Response) => {
     const { assessmentId } = req.params;
     try {
-        const { results } = await baserowServer.get(RESULTADOS_TABLE_ID, `?filter__avaliacao__link_row_has=${assessmentId}`);
-        if (results && results.length > 0) {
-            const profileData = results[0];
-            try { profileData.analise_ia = JSON.parse(profileData.analise_ia); } catch (e) {}
-            res.json({ success: true, result: profileData });
+        const result = await baserowServer.getRow(ASSESSMENT_TABLE_ID, parseInt(assessmentId));
+        if (result) {
+            try {
+                if (result.analise_ia) {
+                    result.analise_ia = JSON.parse(result.analise_ia);
+                }
+            } catch (e) {}
+            res.json({ success: true, result });
         } else {
             res.status(404).json({ error: "Resultado da avaliação não encontrado." });
         }
@@ -627,12 +582,15 @@ app.get('/api/candidates/:candidateId/behavioral-profile', async (req: Request, 
     const { candidateId } = req.params;
     if (!candidateId) { return res.status(400).json({ error: 'ID do candidato é obrigatório.' }); }
     try {
-        const { results: avaliacoes } = await baserowServer.get(AVALIACOES_TABLE_ID, `?filter__candidato__link_row_has=${candidateId}`);
-        if (!avaliacoes || avaliacoes.length === 0) { return res.json({ success: true, profile: null }); }
-        const avaliacaoId = avaliacoes[0].id;
-        const { results: resultados } = await baserowServer.get(RESULTADOS_TABLE_ID, `?filter__avaliacao__link_row_has=${avaliacaoId}`);
-        if (resultados && resultados.length > 0) {
-            res.json({ success: true, profile: resultados[0] });
+        const { results } = await baserowServer.get(ASSESSMENT_TABLE_ID, `?filter__candidato__link_row_has=${candidateId}&filter__status__equal=Concluído`);
+        if (results && results.length > 0) {
+            const profileData = results[0];
+             try {
+                if (profileData.analise_ia) {
+                    profileData.analise_ia = JSON.parse(profileData.analise_ia);
+                }
+            } catch (e) {}
+            res.json({ success: true, profile: profileData });
         } else {
             res.json({ success: true, profile: null });
         }
